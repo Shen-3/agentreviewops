@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from agentreview_api.audit import AUDIT_ACTION_API_KEY_CREATED, AUDIT_ACTION_ORGANIZATION_BOOTSTRAPPED
 from agentreview_api.db import OrganizationRecord, UserRecord
-from agentreview_api.repository import create_api_key, create_organization, create_user
+from agentreview_api.repository import create_api_key, create_audit_event, create_organization, create_user
 
 
 class BootstrapError(RuntimeError):
@@ -43,6 +44,31 @@ def bootstrap_account(
     organization = _get_or_create_organization(session, slug=normalized_slug, name=org_name.strip() or normalized_slug)
     user = _get_or_create_user(session, organization_id=organization.id, email=normalized_email, name=user_name)
     api_key, secret = create_api_key(session, organization_id=organization.id, name=api_key_name.strip() or "Bootstrap key")
+    create_audit_event(
+        session,
+        organization_id=organization.id,
+        actor_type="system",
+        actor_id=None,
+        action=AUDIT_ACTION_ORGANIZATION_BOOTSTRAPPED,
+        target_type="organization",
+        target_id=organization.id,
+        metadata={
+            "source": "bootstrap",
+        },
+    )
+    create_audit_event(
+        session,
+        organization_id=organization.id,
+        actor_type="system",
+        actor_id=None,
+        action=AUDIT_ACTION_API_KEY_CREATED,
+        target_type="api_key",
+        target_id=api_key.id,
+        metadata={
+            "api_key_name": api_key.name,
+            "source": "bootstrap",
+        },
+    )
 
     return BootstrapResult(
         organization_id=organization.id,

@@ -24,6 +24,7 @@ def test_alembic_upgrade_creates_analysis_tables(tmp_path: Path, monkeypatch) ->
         "repository_memberships",
         "api_keys",
         "policies",
+        "audit_events",
         "analysis_runs",
         "changed_files",
         "risk_findings",
@@ -32,3 +33,21 @@ def test_alembic_upgrade_creates_analysis_tables(tmp_path: Path, monkeypatch) ->
 
     analysis_columns = {column["name"] for column in inspector.get_columns("analysis_runs")}
     assert "organization_id" in analysis_columns
+
+    audit_columns = {column["name"] for column in inspector.get_columns("audit_events")}
+    assert {
+        "organization_id",
+        "actor_type",
+        "actor_id",
+        "action",
+        "target_type",
+        "target_id",
+        "metadata_json",
+    } <= audit_columns
+
+    audit_indexes = {index["name"] for index in inspector.get_indexes("audit_events")}
+    assert {
+        "ix_audit_events_org_action",
+        "ix_audit_events_org_actor",
+        "ix_audit_events_org_target",
+    } <= audit_indexes

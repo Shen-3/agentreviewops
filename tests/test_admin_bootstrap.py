@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from agentreview.cli import app
 from agentreview_api.auth import authenticate_api_key, key_prefix
-from agentreview_api.db import ApiKeyRecord, create_session_factory
+from agentreview_api.db import ApiKeyRecord, AuditEventRecord, create_session_factory
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -51,9 +51,13 @@ def test_admin_bootstrap_creates_org_user_and_one_time_api_key(tmp_path: Path, m
         assert record.name == "Local CI"
         assert record.key_hash != api_key
         auth = authenticate_api_key(session, api_key)
+        audit_events = list(session.scalars(select(AuditEventRecord).order_by(AuditEventRecord.created_at)).all())
 
     assert auth is not None
     assert auth.api_key_name == "Local CI"
+    assert [event.action for event in audit_events] == ["organization.bootstrapped", "api_key.created"]
+    assert "Reviewer@Example.COM" not in str([event.metadata_json for event in audit_events])
+    assert api_key not in str([event.metadata_json for event in audit_events])
 
 
 def test_admin_bootstrap_reuses_org_and_user_but_issues_new_key(tmp_path: Path, monkeypatch) -> None:

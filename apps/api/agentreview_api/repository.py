@@ -4,10 +4,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from agentreview.models import AgentReviewConfig, DiffFile, RiskAnalysis, RiskFinding
+from agentreview_api.audit import sanitize_audit_metadata
 from agentreview_api.auth import generate_api_key, hash_api_key, key_prefix
 from agentreview_api.db import (
     AnalysisRunRecord,
     ApiKeyRecord,
+    AuditEventRecord,
     ChangedFileRecord,
     OrganizationRecord,
     PolicyRecord,
@@ -97,6 +99,64 @@ def create_api_key(
     session.commit()
     session.refresh(record)
     return record, api_key
+
+
+def create_audit_event(
+    session: Session,
+    *,
+    organization_id: str,
+    actor_type: str,
+    actor_id: str | None,
+    action: str,
+    target_type: str,
+    target_id: str | None,
+    metadata: dict | None = None,
+) -> AuditEventRecord:
+    record = AuditEventRecord(
+        organization_id=organization_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        metadata_json=sanitize_audit_metadata(metadata),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def list_audit_events(
+    session: Session,
+    *,
+    organization_id: str,
+    limit: int = 100,
+    action: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    actor_type: str | None = None,
+    since=None,
+    until=None,
+) -> list[AuditEventRecord]:
+    statement = (
+        select(AuditEventRecord)
+        .where(AuditEventRecord.organization_id == organization_id)
+    )
+    if action is not None:
+        statement = statement.where(AuditEventRecord.action == action)
+    if target_type is not None:
+        statement = statement.where(AuditEventRecord.target_type == target_type)
+    if target_id is not None:
+        statement = statement.where(AuditEventRecord.target_id == target_id)
+    if actor_type is not None:
+        statement = statement.where(AuditEventRecord.actor_type == actor_type)
+    if since is not None:
+        statement = statement.where(AuditEventRecord.created_at >= since)
+    if until is not None:
+        statement = statement.where(AuditEventRecord.created_at <= until)
+    statement = statement.order_by(AuditEventRecord.created_at.desc()).limit(limit)
+    return list(session.scalars(statement).all())
 
 
 def create_policy(

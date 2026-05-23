@@ -7,7 +7,14 @@ from fastapi.testclient import TestClient
 
 from agentreview_api.db import create_session_factory
 from agentreview_api.main import app, get_session
-from agentreview_api.repository import create_api_key, create_organization, create_repository, create_repository_membership, create_user
+from agentreview_api.repository import (
+    create_api_key,
+    create_audit_event,
+    create_organization,
+    create_repository,
+    create_repository_membership,
+    create_user,
+)
 
 PROJECT_ROOT = Path(__file__).parents[2]
 
@@ -21,6 +28,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     command.upgrade(alembic_config, "head")
 
     session_factory = create_session_factory(database_url)
+    app.state.test_session_factory = session_factory
     with session_factory() as session:
         organization = create_organization(session, slug="acme", name="Acme Engineering")
         user = create_user(session, organization_id=organization.id, email="reviewer@example.com", name="Reviewer")
@@ -47,6 +55,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
             yield test_client
     finally:
         app.dependency_overrides.clear()
+        if hasattr(app.state, "test_session_factory"):
+            delattr(app.state, "test_session_factory")
 
 
 def test_health(client: TestClient) -> None:
@@ -78,6 +88,15 @@ def test_analysis_endpoints_reject_anonymous_requests(client: TestClient) -> Non
     assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
 
 
+def test_audit_events_reject_anonymous_requests(client: TestClient) -> None:
+    client.headers.clear()
+
+    response = client.get("/api/audit-events")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
+
+
 def test_policy_create_list_and_org_override_applies_to_analysis(client: TestClient) -> None:
     policy_response = client.post(
         "/api/policies",
@@ -101,6 +120,17 @@ def test_policy_create_list_and_org_override_applies_to_analysis(client: TestCli
     assert policy_body["name"] == "Low-friction docs pilot"
     assert policy_body["config"]["critical_paths"] == ["never/**"]
 
+    audit_response = client.get("/api/audit-events")
+
+    assert audit_response.status_code == 200
+    audit_events = audit_response.json()
+    assert audit_events[0]["action"] == "policy.created"
+    assert audit_events[0]["target_type"] == "policy"
+    assert audit_events[0]["target_id"] == policy_body["policy_id"]
+    assert audit_events[0]["actor_type"] == "api_key"
+    assert audit_events[0]["metadata"]["policy_name"] == "Low-friction docs pilot"
+    assert "config" not in audit_events[0]["metadata"]
+
     list_response = client.get("/api/policies")
 
     assert list_response.status_code == 200
@@ -123,6 +153,13 @@ def test_policy_create_list_and_org_override_applies_to_analysis(client: TestCli
     assert analysis_body["risk_score"] == 0
     assert analysis_body["risk_level"] == "low"
     assert {finding["rule_id"] for finding in analysis_body["findings"]} == {"missing-docs", "small-focused-diff"}
+
+    audit_response = client.get("/api/audit-events")
+    assert [event["action"] for event in audit_response.json()[:2]] == ["analysis.created", "policy.created"]
+
+    policy_filter_response = client.get("/api/audit-events", params={"action": "policy.created"})
+    assert policy_filter_response.status_code == 200
+    assert [event["action"] for event in policy_filter_response.json()] == ["policy.created"]
 
 
 def test_invalid_policy_config_returns_precise_validation_error(client: TestClient) -> None:
@@ -174,6 +211,32 @@ def test_analyze_diff_persists_and_returns_report(client: TestClient) -> None:
     assert report_body["markdown"] == body["markdown"]
     assert report_body["changed_files"][0]["path"] == "auth/session.py"
 
+    audit_response = client.get("/api/audit-events")
+
+    assert audit_response.status_code == 200
+    audit_event = audit_response.json()[0]
+    assert audit_event["action"] == "analysis.created"
+    assert audit_event["target_type"] == "analysis_run"
+    assert audit_event["target_id"] == body["analysis_run_id"]
+    assert audit_event["metadata"]["repository"] == "platform/checkout-api"
+    assert audit_event["metadata"]["risk_level"] == "high"
+    assert audit_event["metadata"]["risk_score"] == 55
+    assert audit_event["metadata"]["agent_name"] == "Codex"
+    assert audit_event["metadata"]["branch"] == "codex/auth-session-hardening"
+    assert "diff" not in audit_event["metadata"]
+    assert "markdown" not in audit_event["metadata"]
+
+    target_filter_response = client.get(
+        "/api/audit-events",
+        params={
+            "target_type": "analysis_run",
+            "target_id": body["analysis_run_id"],
+            "limit": 1,
+        },
+    )
+    assert target_filter_response.status_code == 200
+    assert target_filter_response.json()[0]["target_id"] == body["analysis_run_id"]
+
 
 def test_list_analysis_runs_returns_dashboard_summaries(client: TestClient) -> None:
     diff_text = (PROJECT_ROOT / "examples" / "sample.diff").read_text(encoding="utf-8")
@@ -210,6 +273,36 @@ def test_list_analysis_runs_returns_dashboard_summaries(client: TestClient) -> N
 
     assert detail_response.status_code == 200
     assert detail_response.json()["analysis_run_id"] == analysis_run_id
+
+
+def test_audit_events_are_scoped_to_authenticated_organization(client: TestClient) -> None:
+    policy_response = client.post(
+        "/api/policies",
+        json={
+            "name": "Scoped policy",
+            "config": {"version": 1},
+        },
+    )
+    assert policy_response.status_code == 200
+
+    with app.state.test_session_factory() as session:
+        other_org = create_organization(session, slug="other", name="Other Org")
+        create_audit_event(
+            session,
+            organization_id=other_org.id,
+            actor_type="system",
+            actor_id=None,
+            action="other.created",
+            target_type="organization",
+            target_id=other_org.id,
+        )
+
+    response = client.get("/api/audit-events")
+
+    assert response.status_code == 200
+    actions = {event["action"] for event in response.json()}
+    assert "policy.created" in actions
+    assert "other.created" not in actions
 
 
 def test_report_fetch_returns_404_for_missing_run(client: TestClient) -> None:

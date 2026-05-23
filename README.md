@@ -46,6 +46,7 @@ Implemented endpoints:
 
 - `GET /health`
 - `GET /api/auth/me`
+- `GET /api/audit-events`
 - `GET /api/policies`
 - `POST /api/policies`
 - `POST /api/analyze/diff`
@@ -147,6 +148,8 @@ ai:
 
 The current AI module is a provider abstraction with secret redaction and fake-provider tests. It does not call external LLM APIs.
 
+Audit events are organization-scoped and available at `GET /api/audit-events`. AgentReviewOps records summary-only events for bootstrap, API key creation, policy creation, and analysis creation. See [audit event docs](docs/audit-events.md).
+
 Analyzer plugins are disabled by default. A plugin must be enabled by ID and granted explicit permissions:
 
 ```yaml
@@ -163,7 +166,7 @@ The built-in example plugin demonstrates the contract by flagging dependency man
 ## Roadmap
 
 - Add first-class admin UX for issuing and revoking API keys.
-- Add frontend policy editor and audit history.
+- Add frontend policy editor and richer audit history.
 - Add real AI providers behind explicit opt-in configuration.
 - Add plugin discovery/loading from installed packages.
 

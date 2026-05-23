@@ -31,6 +31,7 @@ class OrganizationRecord(Base):
     repositories: Mapped[list[RepositoryRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     api_keys: Mapped[list[ApiKeyRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     policies: Mapped[list[PolicyRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    audit_events: Mapped[list[AuditEventRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     analysis_runs: Mapped[list[AnalysisRunRecord]] = relationship(back_populates="organization")
 
 
@@ -130,6 +131,26 @@ class PolicyRecord(Base):
     )
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="policies")
+
+
+class AuditEventRecord(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    actor_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    actor_id: Mapped[str | None] = mapped_column(String(255))
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_id: Mapped[str | None] = mapped_column(String(255))
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    organization: Mapped[OrganizationRecord] = relationship(back_populates="audit_events")
 
 
 class AnalysisRunRecord(Base):

@@ -11,14 +11,17 @@ from agentreview.gitdiff import parse_unified_diff
 from agentreview.models import AgentReviewConfig, DiffFile, RiskFinding, RiskLevel
 from agentreview.report import generate_markdown_report
 from agentreview.risk import analyze_risk
+from agentreview_api.audit import AUDIT_ACTION_ANALYSIS_CREATED, AUDIT_ACTION_POLICY_CREATED
 from agentreview_api.auth import AuthContext, require_api_key
 from agentreview_api.db import get_session
 from agentreview_api.repository import (
     create_analysis_run,
+    create_audit_event,
     create_policy,
     get_analysis_run,
     get_enabled_policy,
     list_analysis_runs,
+    list_audit_events,
     list_policies,
     to_diff_files,
     to_risk_findings,
@@ -122,6 +125,17 @@ class PolicyResponse(BaseModel):
     updated_at: datetime
 
 
+class AuditEventResponse(BaseModel):
+    audit_event_id: str
+    created_at: datetime
+    actor_type: str
+    actor_id: str | None
+    action: str
+    target_type: str
+    target_id: str | None
+    metadata: dict
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service="agentreview-api")
@@ -134,6 +148,34 @@ def auth_me(auth: AuthContext = Depends(require_api_key)) -> AuthMeResponse:
         api_key_id=auth.api_key_id,
         api_key_name=auth.api_key_name,
     )
+
+
+@app.get("/api/audit-events", response_model=list[AuditEventResponse])
+def get_audit_events(
+    limit: int = Query(default=100, ge=1, le=500),
+    action: str | None = Query(default=None),
+    target_type: str | None = Query(default=None),
+    target_id: str | None = Query(default=None),
+    actor_type: str | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    auth: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> list[AuditEventResponse]:
+    return [
+        _audit_event_response(record)
+        for record in list_audit_events(
+            session,
+            organization_id=auth.organization_id,
+            limit=limit,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            actor_type=actor_type,
+            since=since,
+            until=until,
+        )
+    ]
 
 
 @app.get("/api/policies", response_model=list[PolicyResponse])
@@ -154,6 +196,20 @@ def save_policy(
         config=request.config,
         enabled=request.enabled,
         scope=request.scope,
+    )
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_POLICY_CREATED,
+        target_type="policy",
+        target_id=record.id,
+        metadata={
+            "policy_name": record.name,
+            "enabled": record.enabled,
+            "scope": record.scope,
+        },
     )
     return _policy_response(record)
 
@@ -182,6 +238,26 @@ def analyze_diff(
         author=request.author,
         agent_name=request.agent_name,
         branch=request.branch,
+    )
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_ANALYSIS_CREATED,
+        target_type="analysis_run",
+        target_id=record.id,
+        metadata={
+            "repository": request.repository,
+            "pull_request_number": request.pull_request_number,
+            "agent_name": request.agent_name,
+            "branch": request.branch,
+            "risk_level": analysis.risk_level,
+            "risk_score": analysis.risk_score,
+            "changed_file_count": len(changed_files),
+            "finding_count": len(analysis.findings),
+            "config_source": "organization_policy" if get_enabled_policy(session, organization_id=auth.organization_id) is not None else "request_or_default",
+        },
     )
 
     return AnalyzeDiffResponse(
@@ -272,4 +348,17 @@ def _policy_response(record) -> PolicyResponse:
         config=AgentReviewConfig.model_validate(record.config_json),
         created_at=record.created_at,
         updated_at=record.updated_at,
+    )
+
+
+def _audit_event_response(record) -> AuditEventResponse:
+    return AuditEventResponse(
+        audit_event_id=record.id,
+        created_at=record.created_at,
+        actor_type=record.actor_type,
+        actor_id=record.actor_id,
+        action=record.action,
+        target_type=record.target_type,
+        target_id=record.target_id,
+        metadata=record.metadata_json,
     )
