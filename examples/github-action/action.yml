@@ -1,0 +1,27 @@
+name: AgentReviewOps scan-diff
+description: Analyze a prepared unified diff and generate an AgentReviewOps Markdown report.
+
+inputs:
+  diff-file:
+    description: Path to the unified diff file to analyze.
+    required: false
+    default: agentreview.diff
+  config:
+    description: Path to the AgentReviewOps YAML config file.
+    required: false
+    default: .agentreview.yml
+  output:
+    description: Path where the Markdown report should be written.
+    required: false
+    default: agentreview-report.md
+
+runs:
+  using: composite
+  steps:
+    - name: Install AgentReviewOps from checkout
+      shell: bash
+      run: python -m pip install -e "."
+
+    - name: Run AgentReviewOps scan
+      shell: bash
+      run: agentreview scan-diff --diff-file "${{ inputs.diff-file }}" --config "${{ inputs.config }}" --output "${{ inputs.output }}"

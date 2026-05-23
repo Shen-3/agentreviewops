@@ -1,0 +1,11 @@
+diff --git a/src/agentreview/old_name.py b/src/agentreview/new_name.py
+similarity index 83%
+rename from src/agentreview/old_name.py
+rename to src/agentreview/new_name.py
+index 1111111..2222222 100644
+--- a/src/agentreview/old_name.py
++++ b/src/agentreview/new_name.py
+@@ -1,3 +1,3 @@
+ def message() -> str:
+-    return "old"
++    return "new"

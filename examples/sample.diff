@@ -1,0 +1,10 @@
+diff --git a/auth/session.py b/auth/session.py
+index 1111111..2222222 100644
+--- a/auth/session.py
++++ b/auth/session.py
+@@ -1,5 +1,7 @@
+ def create_session(user):
+-    return {"user_id": user.id}
++    if not user.is_active:
++        raise PermissionError("inactive user")
++    return {"user_id": user.id, "roles": user.roles}

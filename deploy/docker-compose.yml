@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agentreview
+      POSTGRES_USER: agentreview
+      POSTGRES_PASSWORD: ${AGENTREVIEW_POSTGRES_PASSWORD:-agentreview}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentreview -d agentreview"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    environment:
+      AGENTREVIEW_DATABASE_URL: postgresql+psycopg://agentreview:${AGENTREVIEW_POSTGRES_PASSWORD:-agentreview}@postgres:5432/agentreview
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        VITE_AGENTREVIEW_API_URL: http://127.0.0.1:8000
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres-data:
