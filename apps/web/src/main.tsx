@@ -8,6 +8,7 @@ type RiskLevel = "low" | "medium" | "high" | "block";
 type FindingSeverity = "info" | "low" | "medium" | "high" | "critical";
 type LoadMode = "loading" | "ready" | "empty" | "error";
 type DataSource = "api" | "demo";
+type AuditMetadata = Record<string, unknown>;
 
 type Finding = {
   severity: FindingSeverity;
@@ -41,6 +42,16 @@ type Analysis = {
   changedFiles: ChangedFile[];
   findings: Finding[];
   report: string;
+};
+
+type AuditEvent = {
+  id: string;
+  createdAt: string;
+  action: string;
+  actor: string;
+  target: string;
+  summary: string;
+  metadata: AuditMetadata;
 };
 
 type ApiSummary = {
@@ -80,6 +91,17 @@ type ApiDetail = {
     is_test_file: boolean;
   }>;
   markdown: string;
+};
+
+type ApiAuditEvent = {
+  audit_event_id: string;
+  created_at: string;
+  actor_type: string;
+  actor_id: string | null;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  metadata: AuditMetadata;
 };
 
 const API_BASE_URL = import.meta.env.VITE_AGENTREVIEW_API_URL || "http://127.0.0.1:8000";
@@ -179,32 +201,97 @@ Release infrastructure changed. Require platform owner review before merge.
   },
 ];
 
+const seededAuditEvents: AuditEvent[] = [
+  {
+    id: "audit_analysis_8fb2",
+    createdAt: "05/23/2026, 11:35",
+    action: "analysis.created",
+    actor: "api key local-ci",
+    target: "analysis run run_8fb2",
+    summary: "platform/checkout-api #1842 analyzed at high risk.",
+    metadata: {
+      repository: "platform/checkout-api",
+      pull_request_number: 1842,
+      agent_name: "Codex",
+      risk_level: "high",
+      risk_score: 55,
+      changed_file_count: 1,
+      finding_count: 3,
+    },
+  },
+  {
+    id: "audit_policy_default",
+    createdAt: "05/23/2026, 10:42",
+    action: "policy.created",
+    actor: "api key platform-admin",
+    target: "policy default-review-policy",
+    summary: "Default review policy saved for organization scope.",
+    metadata: {
+      policy_name: "Default review policy",
+      enabled: true,
+      scope: "organization",
+    },
+  },
+  {
+    id: "audit_key_local_ci",
+    createdAt: "05/23/2026, 10:39",
+    action: "api_key.created",
+    actor: "system",
+    target: "api key local-ci",
+    summary: "Bootstrap key created for CI and dashboard access.",
+    metadata: {
+      api_key_name: "Local CI",
+      source: "bootstrap",
+    },
+  },
+  {
+    id: "audit_org_bootstrap",
+    createdAt: "05/23/2026, 10:38",
+    action: "organization.bootstrapped",
+    actor: "system",
+    target: "organization acme",
+    summary: "Self-hosted organization bootstrapped.",
+    metadata: {
+      source: "bootstrap",
+    },
+  },
+];
+
 function Dashboard() {
   const [analyses, setAnalyses] = React.useState<Analysis[]>([]);
+  const [auditEvents, setAuditEvents] = React.useState<AuditEvent[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [mode, setMode] = React.useState<LoadMode>("loading");
   const [dataSource, setDataSource] = React.useState<DataSource>("api");
   const [riskFilter, setRiskFilter] = React.useState<RiskLevel | "all">("all");
+  const [auditActionFilter, setAuditActionFilter] = React.useState("all");
   const [query, setQuery] = React.useState("");
   const [apiKey, setApiKey] = React.useState(() => window.localStorage.getItem(API_KEY_STORAGE_KEY) || "");
   const [apiKeyInput, setApiKeyInput] = React.useState("");
 
-  const loadAnalyses = React.useCallback(async () => {
+  const loadWorkspaceData = React.useCallback(async () => {
     setMode("loading");
     if (!apiKey) {
       setAnalyses(seededAnalyses);
+      setAuditEvents(seededAuditEvents);
       setSelectedId(seededAnalyses[0].id);
       setDataSource("demo");
       setMode("ready");
       return;
     }
     try {
-      const response = await fetchWithTimeout(`${API_BASE_URL}/api/analysis-runs`, apiKey);
-      const summaries = (await response.json()) as ApiSummary[];
+      const [analysisResponse, auditResponse] = await Promise.all([
+        fetchWithTimeout(`${API_BASE_URL}/api/analysis-runs`, apiKey),
+        fetchWithTimeout(`${API_BASE_URL}/api/audit-events?limit=50`, apiKey),
+      ]);
+      const summaries = (await analysisResponse.json()) as ApiSummary[];
+      const auditPayload = (await auditResponse.json()) as ApiAuditEvent[];
       const normalized = summaries.map(normalizeSummary);
+      const normalizedAudit = auditPayload.map(normalizeAuditEvent);
       setAnalyses(normalized);
+      setAuditEvents(normalizedAudit);
       setDataSource("api");
-      setMode(normalized.length ? "ready" : "empty");
+      setMode(normalized.length || normalizedAudit.length ? "ready" : "empty");
       setSelectedId(normalized[0]?.id ?? null);
       if (normalized[0]) {
         void loadAnalysisDetail(normalized[0].id, apiKey, setAnalyses, setMode);
@@ -217,6 +304,7 @@ function Dashboard() {
         return;
       }
       setAnalyses(seededAnalyses);
+      setAuditEvents(seededAuditEvents);
       setSelectedId(seededAnalyses[0].id);
       setDataSource("demo");
       setMode("ready");
@@ -224,8 +312,8 @@ function Dashboard() {
   }, [apiKey]);
 
   React.useEffect(() => {
-    void loadAnalyses();
-  }, [loadAnalyses]);
+    void loadWorkspaceData();
+  }, [loadWorkspaceData]);
 
   const filteredAnalyses = React.useMemo(() => {
     if (mode === "empty") {
@@ -240,9 +328,15 @@ function Dashboard() {
   }, [analyses, mode, query, riskFilter]);
 
   const selected = filteredAnalyses.find((analysis) => analysis.id === selectedId) ?? filteredAnalyses[0] ?? null;
-  const medianScore = median(filteredAnalyses.map((analysis) => analysis.riskScore));
   const highCount = filteredAnalyses.filter((analysis) => ["high", "block"].includes(analysis.riskLevel)).length;
   const findingCount = filteredAnalyses.reduce((total, analysis) => total + analysis.findingCount, 0);
+  const auditActionOptions = React.useMemo(() => ["all", ...Array.from(new Set(auditEvents.map((event) => event.action))).sort()], [auditEvents]);
+  const filteredAuditEvents = React.useMemo(() => {
+    if (mode === "empty") {
+      return [];
+    }
+    return auditEvents.filter((event) => auditActionFilter === "all" || event.action === auditActionFilter);
+  }, [auditActionFilter, auditEvents, mode]);
 
   const banner = getBanner(mode, dataSource);
   const saveApiKey = (event: React.FormEvent<HTMLFormElement>) => {
@@ -259,6 +353,7 @@ function Dashboard() {
     window.localStorage.removeItem(API_KEY_STORAGE_KEY);
     setApiKey("");
     setAnalyses(seededAnalyses);
+    setAuditEvents(seededAuditEvents);
     setSelectedId(seededAnalyses[0].id);
     setDataSource("demo");
     setMode("ready");
@@ -328,7 +423,7 @@ function Dashboard() {
               <Database size={16} />
               Empty
             </button>
-            <button className="primary" type="button" onClick={() => void loadAnalyses()}>
+            <button className="primary" type="button" onClick={() => void loadWorkspaceData()}>
               <ShieldCheck size={16} />
               Live data
             </button>
@@ -345,7 +440,7 @@ function Dashboard() {
           <Metric label="Total analyses" value={filteredAnalyses.length} />
           <Metric label="High or block" value={highCount} />
           <Metric label="Open findings" value={findingCount} />
-          <Metric label="Median score" value={medianScore} />
+          <Metric label="Audit events" value={filteredAuditEvents.length} />
         </section>
 
         <section className="content-grid">
@@ -387,6 +482,14 @@ function Dashboard() {
 
           <AnalysisDetail selected={selected} />
         </section>
+
+        <AuditHistory
+          events={filteredAuditEvents}
+          mode={mode}
+          actionFilter={auditActionFilter}
+          actionOptions={auditActionOptions}
+          onActionFilterChange={setAuditActionFilter}
+        />
       </main>
     </div>
   );
@@ -556,6 +659,111 @@ function ReportPreview({ report }: { report: string }) {
   );
 }
 
+function AuditHistory({
+  events,
+  mode,
+  actionFilter,
+  actionOptions,
+  onActionFilterChange,
+}: {
+  events: AuditEvent[];
+  mode: LoadMode;
+  actionFilter: string;
+  actionOptions: string[];
+  onActionFilterChange: (value: string) => void;
+}) {
+  return (
+    <section className="audit-panel" id="audit" aria-labelledby="audit-history-title">
+      <div className="section-head">
+        <div>
+          <p className="eyebrow">Organization audit</p>
+          <h2 id="audit-history-title">Audit history</h2>
+          <p>Latest governance events from analysis, policy, API key, and bootstrap flows.</p>
+        </div>
+        <select value={actionFilter} onChange={(event) => onActionFilterChange(event.target.value)} aria-label="Filter audit events by action">
+          {actionOptions.map((action) => (
+            <option key={action} value={action}>
+              {action === "all" ? "All actions" : action}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="table-wrap audit-table-wrap">
+        <table className="audit-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Action</th>
+              <th>Actor</th>
+              <th>Target</th>
+              <th>Summary</th>
+              <th>Metadata</th>
+            </tr>
+          </thead>
+          <tbody>
+            <AuditRows events={events} mode={mode} />
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function AuditRows({ events, mode }: { events: AuditEvent[]; mode: LoadMode }) {
+  if (mode === "loading") {
+    return <AuditEmptyRow message="Loading audit events..." />;
+  }
+  if (mode === "error") {
+    return <AuditEmptyRow message="Audit events could not be loaded." />;
+  }
+  if (!events.length) {
+    return <AuditEmptyRow message="No audit events to display." />;
+  }
+  return (
+    <>
+      {events.map((event) => (
+        <tr key={event.id}>
+          <td>{event.createdAt}</td>
+          <td>
+            <span className="action-badge">{event.action}</span>
+          </td>
+          <td>{event.actor}</td>
+          <td>{event.target}</td>
+          <td>{event.summary}</td>
+          <td>
+            <MetadataPreview metadata={event.metadata} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function AuditEmptyRow({ message }: { message: string }) {
+  return (
+    <tr>
+      <td colSpan={6}>{message}</td>
+    </tr>
+  );
+}
+
+function MetadataPreview({ metadata }: { metadata: AuditMetadata }) {
+  const entries = Object.entries(metadata).filter(([, value]) => value !== null && value !== undefined);
+  if (!entries.length) {
+    return <span className="metadata-muted">No metadata</span>;
+  }
+  return (
+    <div className="metadata-list">
+      {entries.slice(0, 5).map(([key, value]) => (
+        <span className="metadata-pill" key={key}>
+          {key}: {formatMetadataValue(value)}
+        </span>
+      ))}
+      {entries.length > 5 ? <span className="metadata-muted">+{entries.length - 5} more</span> : null}
+    </div>
+  );
+}
+
 function RiskBadge({ level, label }: { level: RiskLevel; label: string }) {
   return <span className={`risk-badge risk-${level}`}>{label}</span>;
 }
@@ -638,27 +846,55 @@ function normalizeDetail(detail: ApiDetail): Partial<Analysis> {
   };
 }
 
-function getBanner(mode: LoadMode, dataSource: DataSource) {
-  if (mode === "loading") {
-    return "Loading analysis runs from the AgentReviewOps API...";
-  }
-  if (mode === "error") {
-    return "Unable to load analysis runs. Check the API URL or retry later.";
-  }
-  if (mode === "empty") {
-    return "No analysis runs match this workspace yet.";
-  }
-  if (dataSource === "demo") {
-    return "API unavailable. Showing demo analysis data.";
-  }
-  return "";
+function normalizeAuditEvent(event: ApiAuditEvent): AuditEvent {
+  return {
+    id: event.audit_event_id,
+    createdAt: formatDate(event.created_at),
+    action: event.action,
+    actor: formatActor(event.actor_type, event.actor_id),
+    target: formatTarget(event.target_type, event.target_id),
+    summary: summarizeAuditEvent(event.action, event.metadata),
+    metadata: event.metadata,
+  };
 }
 
-function median(values: number[]) {
-  if (!values.length) {
-    return 0;
+function summarizeAuditEvent(action: string, metadata: AuditMetadata) {
+  if (action === "analysis.created") {
+    const repository = readMetadataText(metadata, "repository") || "Analysis run";
+    const pullRequest = readMetadataText(metadata, "pull_request_number");
+    const riskLevel = readMetadataText(metadata, "risk_level");
+    const riskScore = readMetadataText(metadata, "risk_score");
+    const riskText = riskLevel ? ` at ${riskLevel}${riskScore ? ` risk (${riskScore})` : " risk"}` : "";
+    return `${repository}${pullRequest ? ` #${pullRequest}` : ""} analyzed${riskText}.`;
   }
-  return [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  if (action === "policy.created") {
+    const policyName = readMetadataText(metadata, "policy_name") || "Policy";
+    const enabled = metadata.enabled === false ? "disabled" : "enabled";
+    return `${policyName} saved as ${enabled}.`;
+  }
+  if (action === "api_key.created") {
+    return `${readMetadataText(metadata, "api_key_name") || "API key"} created.`;
+  }
+  if (action === "organization.bootstrapped") {
+    return "Self-hosted organization bootstrapped.";
+  }
+  return `${formatLabel(action)} recorded.`;
+}
+
+function getBanner(mode: LoadMode, dataSource: DataSource) {
+  if (mode === "loading") {
+    return "Loading workspace data from the AgentReviewOps API...";
+  }
+  if (mode === "error") {
+    return "Unable to load workspace data. Check the API URL or retry later.";
+  }
+  if (mode === "empty") {
+    return "No analysis runs or audit events match this workspace yet.";
+  }
+  if (dataSource === "demo") {
+    return "API unavailable. Showing demo analysis and audit data.";
+  }
+  return "";
 }
 
 function formatDate(value: string) {
@@ -673,6 +909,47 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatActor(actorType: string, actorId: string | null) {
+  return actorId ? `${formatLabel(actorType)} ${shortId(actorId)}` : formatLabel(actorType);
+}
+
+function formatTarget(targetType: string, targetId: string | null) {
+  return targetId ? `${formatLabel(targetType)} ${shortId(targetId)}` : formatLabel(targetType);
+}
+
+function formatLabel(value: string) {
+  return value.replace(/[._-]+/g, " ");
+}
+
+function readMetadataText(metadata: AuditMetadata, key: string) {
+  const value = metadata[key];
+  if (value === null || value === undefined || typeof value === "object") {
+    return "";
+  }
+  return String(value);
+}
+
+function formatMetadataValue(value: unknown) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return truncate(String(value), 42);
+  }
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return `${value.length} items`;
+  }
+  return truncate(JSON.stringify(value), 42);
+}
+
+function shortId(value: string) {
+  return value.length > 12 ? `${value.slice(0, 8)}...` : value;
+}
+
+function truncate(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value;
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

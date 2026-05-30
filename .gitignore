@@ -12,6 +12,8 @@ __pycache__/
 *.tsbuildinfo
 .coverage
 htmlcov/
+.codegraph/
+.serena/
 
 .venv/
 venv/
