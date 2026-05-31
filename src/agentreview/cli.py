@@ -22,7 +22,7 @@ admin_app = typer.Typer(help="Administrative commands for self-hosted AgentRevie
 app.add_typer(admin_app, name="admin")
 
 
-def version_callback(value: bool) -> None:
+def version_callback(value: bool | None) -> None:
     if value:
         typer.echo(f"agentreview {__version__}")
         raise typer.Exit()
@@ -30,12 +30,12 @@ def version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
-    version: bool = typer.Option(
-        False,
+    version: bool | None = typer.Option(
+        None,
         "--version",
         callback=version_callback,
         is_eager=True,
-        help="Show the installed AgentReviewOps version.",
+        help="Show version and exit.",
     ),
 ) -> None:
     """AgentReviewOps command line interface."""
