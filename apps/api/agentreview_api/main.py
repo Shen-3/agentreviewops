@@ -11,18 +11,26 @@ from agentreview.gitdiff import parse_unified_diff
 from agentreview.models import AgentReviewConfig, DiffFile, RiskFinding, RiskLevel
 from agentreview.report import generate_markdown_report
 from agentreview.risk import analyze_risk
-from agentreview_api.audit import AUDIT_ACTION_ANALYSIS_CREATED, AUDIT_ACTION_POLICY_CREATED
+from agentreview_api.audit import (
+    AUDIT_ACTION_ANALYSIS_CREATED,
+    AUDIT_ACTION_API_KEY_CREATED,
+    AUDIT_ACTION_API_KEY_REVOKED,
+    AUDIT_ACTION_POLICY_CREATED,
+)
 from agentreview_api.auth import AuthContext, require_api_key
 from agentreview_api.db import get_session
 from agentreview_api.repository import (
     create_analysis_run,
+    create_api_key,
     create_audit_event,
     create_policy,
     get_analysis_run,
     get_enabled_policy,
     list_analysis_runs,
+    list_api_keys,
     list_audit_events,
     list_policies,
+    revoke_api_key,
     to_diff_files,
     to_risk_findings,
 )
@@ -108,6 +116,23 @@ class AuthMeResponse(BaseModel):
     api_key_name: str
 
 
+class ApiKeyCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255, description="Human-readable API key name.")
+
+
+class ApiKeyResponse(BaseModel):
+    api_key_id: str
+    name: str
+    key_prefix: str
+    created_at: datetime
+    revoked_at: datetime | None
+    is_current: bool
+
+
+class ApiKeyCreateResponse(ApiKeyResponse):
+    api_key: str
+
+
 class PolicyCreateRequest(BaseModel):
     name: str = Field(min_length=1, description="Human-readable policy name.")
     config: AgentReviewConfig
@@ -148,6 +173,73 @@ def auth_me(auth: AuthContext = Depends(require_api_key)) -> AuthMeResponse:
         api_key_id=auth.api_key_id,
         api_key_name=auth.api_key_name,
     )
+
+
+@app.get("/api/api-keys", response_model=list[ApiKeyResponse])
+def get_api_keys(auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)) -> list[ApiKeyResponse]:
+    return [_api_key_response(record, auth=auth) for record in list_api_keys(session, organization_id=auth.organization_id)]
+
+
+@app.post("/api/api-keys", response_model=ApiKeyCreateResponse)
+def create_org_api_key(
+    request: ApiKeyCreateRequest,
+    auth: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> ApiKeyCreateResponse:
+    normalized_name = request.name.strip()
+    if not normalized_name:
+        raise HTTPException(status_code=422, detail="API key name is required")
+
+    record, secret = create_api_key(
+        session,
+        organization_id=auth.organization_id,
+        name=normalized_name,
+    )
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_API_KEY_CREATED,
+        target_type="api_key",
+        target_id=record.id,
+        metadata={
+            "api_key_name": record.name,
+            "source": "api",
+        },
+    )
+    return ApiKeyCreateResponse(
+        **_api_key_response(record, auth=auth).model_dump(),
+        api_key=secret,
+    )
+
+
+@app.post("/api/api-keys/{api_key_id}/revoke", response_model=ApiKeyResponse)
+def revoke_org_api_key(
+    api_key_id: str,
+    auth: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> ApiKeyResponse:
+    if api_key_id == auth.api_key_id:
+        raise HTTPException(status_code=400, detail="Cannot revoke the API key used for this request")
+
+    record = revoke_api_key(session, organization_id=auth.organization_id, api_key_id=api_key_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_API_KEY_REVOKED,
+        target_type="api_key",
+        target_id=record.id,
+        metadata={
+            "api_key_name": record.name,
+        },
+    )
+    return _api_key_response(record, auth=auth)
 
 
 @app.get("/api/audit-events", response_model=list[AuditEventResponse])
@@ -348,6 +440,17 @@ def _policy_response(record) -> PolicyResponse:
         config=AgentReviewConfig.model_validate(record.config_json),
         created_at=record.created_at,
         updated_at=record.updated_at,
+    )
+
+
+def _api_key_response(record, *, auth: AuthContext) -> ApiKeyResponse:
+    return ApiKeyResponse(
+        api_key_id=record.id,
+        name=record.name,
+        key_prefix=record.key_prefix,
+        created_at=record.created_at,
+        revoked_at=record.revoked_at,
+        is_current=record.id == auth.api_key_id,
     )
 
 

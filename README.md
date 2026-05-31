@@ -46,6 +46,9 @@ Implemented endpoints:
 
 - `GET /health`
 - `GET /api/auth/me`
+- `GET /api/api-keys`
+- `POST /api/api-keys`
+- `POST /api/api-keys/{api_key_id}/revoke`
 - `GET /api/audit-events`
 - `GET /api/policies`
 - `POST /api/policies`
@@ -104,6 +107,8 @@ agentreview admin bootstrap \
 
 The key is printed once and stored only as a hash. See [self-hosting docs](docs/self-hosting.md) for the current local deployment flow.
 
+Issue additional organization API keys with `POST /api/api-keys`, list existing keys with `GET /api/api-keys`, and revoke inactive keys with `POST /api/api-keys/{api_key_id}/revoke`. Created keys are returned once and are stored only as hashes.
+
 For a containerized local stack:
 
 ```bash
@@ -126,7 +131,7 @@ npm run dev
 
 Then open `http://127.0.0.1:5173`.
 
-The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes analysis list, selected analysis detail, risk badges, findings table, report preview, audit history, and loading/error/empty states.
+The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes analysis list, selected analysis detail, risk badges, findings table, report preview, API key management, audit history, and loading/error/empty states.
 
 ## Sample Config
 
@@ -148,7 +153,7 @@ ai:
 
 The current AI module is a provider abstraction with secret redaction and fake-provider tests. It does not call external LLM APIs.
 
-Audit events are organization-scoped and available at `GET /api/audit-events`. AgentReviewOps records summary-only events for bootstrap, API key creation, policy creation, and analysis creation. See [audit event docs](docs/audit-events.md).
+Audit events are organization-scoped and available at `GET /api/audit-events`. AgentReviewOps records summary-only events for bootstrap, API key creation/revocation, policy creation, and analysis creation. See [audit event docs](docs/audit-events.md).
 
 Analyzer plugins are disabled by default. A plugin must be enabled by ID and granted explicit permissions:
 
@@ -165,8 +170,8 @@ The built-in example plugin demonstrates the contract by flagging dependency man
 
 ## Roadmap
 
-- Add first-class admin UX for issuing and revoking API keys.
-- Add frontend policy editor, audit export, and retention controls.
+- Add frontend policy editor.
+- Add audit export and retention controls.
 - Add real AI providers behind explicit opt-in configuration.
 - Add plugin discovery/loading from installed packages.
 

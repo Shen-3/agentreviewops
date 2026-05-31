@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -99,6 +101,35 @@ def create_api_key(
     session.commit()
     session.refresh(record)
     return record, api_key
+
+
+def list_api_keys(session: Session, *, organization_id: str) -> list[ApiKeyRecord]:
+    statement = (
+        select(ApiKeyRecord)
+        .where(ApiKeyRecord.organization_id == organization_id)
+        .order_by(ApiKeyRecord.created_at.desc())
+    )
+    return list(session.scalars(statement).all())
+
+
+def get_api_key(session: Session, *, organization_id: str, api_key_id: str) -> ApiKeyRecord | None:
+    statement = select(ApiKeyRecord).where(
+        ApiKeyRecord.organization_id == organization_id,
+        ApiKeyRecord.id == api_key_id,
+    )
+    return session.scalar(statement)
+
+
+def revoke_api_key(session: Session, *, organization_id: str, api_key_id: str) -> ApiKeyRecord | None:
+    record = get_api_key(session, organization_id=organization_id, api_key_id=api_key_id)
+    if record is None:
+        return None
+    if record.revoked_at is None:
+        record.revoked_at = datetime.now(timezone.utc)
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+    return record
 
 
 def create_audit_event(

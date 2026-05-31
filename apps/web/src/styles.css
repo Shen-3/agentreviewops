@@ -57,6 +57,12 @@ button:hover {
   transform: translateY(-1px);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
 button.primary {
   border-color: var(--accent);
   background: var(--accent);
@@ -212,6 +218,7 @@ nav {
 .metrics span,
 .section-head p,
 .search span,
+.inline-create-form label,
 dt {
   color: var(--muted);
   font-size: 12px;
@@ -232,6 +239,7 @@ dt {
 
 .analysis-list,
 .analysis-detail,
+.api-key-panel,
 .audit-panel {
   min-width: 0;
 }
@@ -373,6 +381,7 @@ dt {
   box-shadow: var(--shadow);
 }
 
+.api-key-panel,
 .audit-panel {
   margin-top: 24px;
   border: 1px solid var(--line);
@@ -380,6 +389,54 @@ dt {
   background: var(--surface);
   padding: 18px;
   box-shadow: var(--shadow);
+}
+
+.inline-create-form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inline-create-form label {
+  flex-basis: 100%;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.inline-create-form input {
+  width: 220px;
+  padding: 0 10px;
+}
+
+.one-time-key {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  border: 1px solid #b7d6cf;
+  border-radius: 8px;
+  background: #eef8f5;
+  padding: 12px;
+}
+
+.one-time-key div {
+  min-width: 0;
+}
+
+.one-time-key strong,
+.one-time-key span {
+  display: block;
+}
+
+.one-time-key span {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: var(--accent-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
 }
 
 .detail-grid {
@@ -432,6 +489,10 @@ table {
   min-width: 980px;
 }
 
+.api-key-table {
+  min-width: 780px;
+}
+
 th,
 td {
   border-bottom: 1px solid var(--line);
@@ -452,7 +513,9 @@ tr:last-child td {
   border-bottom: 0;
 }
 
-.action-badge {
+.action-badge,
+.status-badge,
+.current-key-label {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
@@ -463,6 +526,24 @@ tr:last-child td {
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.status-badge.active {
+  background: #eaf4ef;
+  color: var(--green);
+}
+
+.status-badge.revoked {
+  background: #f7e3e4;
+  color: var(--red);
+}
+
+.current-key-label {
+  min-height: 22px;
+  margin-left: 8px;
+  background: var(--surface-quiet);
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .metadata-list {
@@ -574,8 +655,17 @@ pre {
   .topbar-actions button,
   .api-key-form,
   .api-key-form input,
+  .inline-create-form,
+  .inline-create-form input,
+  .one-time-key button,
   .nav-link {
     width: 100%;
+  }
+
+  .one-time-key,
+  .inline-create-form {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .detail-grid {

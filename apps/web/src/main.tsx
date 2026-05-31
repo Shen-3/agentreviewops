@@ -54,6 +54,20 @@ type AuditEvent = {
   metadata: AuditMetadata;
 };
 
+type ApiKeyRecord = {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  createdAt: string;
+  revokedAt: string | null;
+  isCurrent: boolean;
+};
+
+type CreatedApiKey = {
+  name: string;
+  value: string;
+};
+
 type ApiSummary = {
   analysis_run_id: string;
   created_at: string;
@@ -102,6 +116,19 @@ type ApiAuditEvent = {
   target_type: string;
   target_id: string | null;
   metadata: AuditMetadata;
+};
+
+type ApiKeyPayload = {
+  api_key_id: string;
+  name: string;
+  key_prefix: string;
+  created_at: string;
+  revoked_at: string | null;
+  is_current: boolean;
+};
+
+type ApiKeyCreatePayload = ApiKeyPayload & {
+  api_key: string;
 };
 
 const API_BASE_URL = import.meta.env.VITE_AGENTREVIEW_API_URL || "http://127.0.0.1:8000";
@@ -257,9 +284,37 @@ const seededAuditEvents: AuditEvent[] = [
   },
 ];
 
+const seededApiKeys: ApiKeyRecord[] = [
+  {
+    id: "key_local_ci",
+    name: "Local CI",
+    keyPrefix: "arok_demo_ci",
+    createdAt: "05/23/2026, 10:39",
+    revokedAt: null,
+    isCurrent: true,
+  },
+  {
+    id: "key_dashboard_operator",
+    name: "Dashboard operator",
+    keyPrefix: "arok_demo_ui",
+    createdAt: "05/23/2026, 10:42",
+    revokedAt: null,
+    isCurrent: false,
+  },
+  {
+    id: "key_retired",
+    name: "Retired bootstrap key",
+    keyPrefix: "arok_demo_old",
+    createdAt: "05/22/2026, 18:12",
+    revokedAt: "05/23/2026, 09:05",
+    isCurrent: false,
+  },
+];
+
 function Dashboard() {
   const [analyses, setAnalyses] = React.useState<Analysis[]>([]);
   const [auditEvents, setAuditEvents] = React.useState<AuditEvent[]>([]);
+  const [apiKeys, setApiKeys] = React.useState<ApiKeyRecord[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [mode, setMode] = React.useState<LoadMode>("loading");
   const [dataSource, setDataSource] = React.useState<DataSource>("api");
@@ -268,30 +323,38 @@ function Dashboard() {
   const [query, setQuery] = React.useState("");
   const [apiKey, setApiKey] = React.useState(() => window.localStorage.getItem(API_KEY_STORAGE_KEY) || "");
   const [apiKeyInput, setApiKeyInput] = React.useState("");
+  const [newApiKeyName, setNewApiKeyName] = React.useState("");
+  const [createdApiKey, setCreatedApiKey] = React.useState<CreatedApiKey | null>(null);
 
   const loadWorkspaceData = React.useCallback(async () => {
     setMode("loading");
     if (!apiKey) {
       setAnalyses(seededAnalyses);
       setAuditEvents(seededAuditEvents);
+      setApiKeys(seededApiKeys);
+      setCreatedApiKey(null);
       setSelectedId(seededAnalyses[0].id);
       setDataSource("demo");
       setMode("ready");
       return;
     }
     try {
-      const [analysisResponse, auditResponse] = await Promise.all([
+      const [analysisResponse, auditResponse, apiKeysResponse] = await Promise.all([
         fetchWithTimeout(`${API_BASE_URL}/api/analysis-runs`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/audit-events?limit=50`, apiKey),
+        fetchWithTimeout(`${API_BASE_URL}/api/api-keys`, apiKey),
       ]);
       const summaries = (await analysisResponse.json()) as ApiSummary[];
       const auditPayload = (await auditResponse.json()) as ApiAuditEvent[];
+      const apiKeyPayload = (await apiKeysResponse.json()) as ApiKeyPayload[];
       const normalized = summaries.map(normalizeSummary);
       const normalizedAudit = auditPayload.map(normalizeAuditEvent);
+      const normalizedApiKeys = apiKeyPayload.map(normalizeApiKey);
       setAnalyses(normalized);
       setAuditEvents(normalizedAudit);
+      setApiKeys(normalizedApiKeys);
       setDataSource("api");
-      setMode(normalized.length || normalizedAudit.length ? "ready" : "empty");
+      setMode(normalized.length || normalizedAudit.length || normalizedApiKeys.length ? "ready" : "empty");
       setSelectedId(normalized[0]?.id ?? null);
       if (normalized[0]) {
         void loadAnalysisDetail(normalized[0].id, apiKey, setAnalyses, setMode);
@@ -305,6 +368,8 @@ function Dashboard() {
       }
       setAnalyses(seededAnalyses);
       setAuditEvents(seededAuditEvents);
+      setApiKeys(seededApiKeys);
+      setCreatedApiKey(null);
       setSelectedId(seededAnalyses[0].id);
       setDataSource("demo");
       setMode("ready");
@@ -337,6 +402,7 @@ function Dashboard() {
     }
     return auditEvents.filter((event) => auditActionFilter === "all" || event.action === auditActionFilter);
   }, [auditActionFilter, auditEvents, mode]);
+  const activeApiKeyCount = apiKeys.filter((record) => record.revokedAt === null).length;
 
   const banner = getBanner(mode, dataSource);
   const saveApiKey = (event: React.FormEvent<HTMLFormElement>) => {
@@ -354,9 +420,58 @@ function Dashboard() {
     setApiKey("");
     setAnalyses(seededAnalyses);
     setAuditEvents(seededAuditEvents);
+    setApiKeys(seededApiKeys);
+    setCreatedApiKey(null);
     setSelectedId(seededAnalyses[0].id);
     setDataSource("demo");
     setMode("ready");
+  };
+  const createDashboardApiKey = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedName = newApiKeyName.trim();
+    if (!apiKey || !normalizedName) {
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/api-keys`, apiKey, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: normalizedName }),
+      });
+      const payload = (await response.json()) as ApiKeyCreatePayload;
+      const record = normalizeApiKey(payload);
+      setApiKeys((current) => [record, ...current]);
+      setCreatedApiKey({ name: record.name, value: payload.api_key });
+      setNewApiKeyName("");
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+      }
+      setMode("error");
+    }
+  };
+  const revokeDashboardApiKey = async (apiKeyId: string) => {
+    if (!apiKey) {
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/api-keys/${apiKeyId}/revoke`, apiKey, {
+        method: "POST",
+      });
+      const revoked = normalizeApiKey((await response.json()) as ApiKeyPayload);
+      setApiKeys((current) => current.map((record) => (record.id === revoked.id ? revoked : record)));
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+      }
+      setMode("error");
+    }
   };
 
   return (
@@ -377,6 +492,9 @@ function Dashboard() {
           </a>
           <a className="nav-link" href="#policies">
             Policies
+          </a>
+          <a className="nav-link" href="#keys">
+            API keys
           </a>
           <a className="nav-link" href="#audit">
             Audit
@@ -440,7 +558,7 @@ function Dashboard() {
           <Metric label="Total analyses" value={filteredAnalyses.length} />
           <Metric label="High or block" value={highCount} />
           <Metric label="Open findings" value={findingCount} />
-          <Metric label="Audit events" value={filteredAuditEvents.length} />
+          <Metric label="Active keys" value={activeApiKeyCount} />
         </section>
 
         <section className="content-grid">
@@ -482,6 +600,18 @@ function Dashboard() {
 
           <AnalysisDetail selected={selected} />
         </section>
+
+        <ApiKeyAdmin
+          apiKeys={apiKeys}
+          mode={mode}
+          dataSource={dataSource}
+          newApiKeyName={newApiKeyName}
+          createdApiKey={createdApiKey}
+          onNameChange={setNewApiKeyName}
+          onCreate={createDashboardApiKey}
+          onDismissCreated={() => setCreatedApiKey(null)}
+          onRevoke={(apiKeyId) => void revokeDashboardApiKey(apiKeyId)}
+        />
 
         <AuditHistory
           events={filteredAuditEvents}
@@ -659,6 +789,144 @@ function ReportPreview({ report }: { report: string }) {
   );
 }
 
+function ApiKeyAdmin({
+  apiKeys,
+  mode,
+  dataSource,
+  newApiKeyName,
+  createdApiKey,
+  onNameChange,
+  onCreate,
+  onDismissCreated,
+  onRevoke,
+}: {
+  apiKeys: ApiKeyRecord[];
+  mode: LoadMode;
+  dataSource: DataSource;
+  newApiKeyName: string;
+  createdApiKey: CreatedApiKey | null;
+  onNameChange: (value: string) => void;
+  onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
+  onDismissCreated: () => void;
+  onRevoke: (apiKeyId: string) => void;
+}) {
+  const liveData = dataSource === "api";
+  return (
+    <section className="api-key-panel" id="keys" aria-labelledby="api-key-admin-title">
+      <div className="section-head">
+        <div>
+          <p className="eyebrow">Access control</p>
+          <h2 id="api-key-admin-title">API keys</h2>
+          <p>Create one-time keys for CI, dashboards, and automation.</p>
+        </div>
+        <form className="inline-create-form" onSubmit={onCreate}>
+          <label htmlFor="new-api-key-name">New key name</label>
+          <input
+            id="new-api-key-name"
+            value={newApiKeyName}
+            onChange={(event) => onNameChange(event.target.value)}
+            placeholder="Release bot"
+            disabled={!liveData}
+          />
+          <button className="primary" type="submit" disabled={!liveData || !newApiKeyName.trim()}>
+            <KeyRound size={16} />
+            Create
+          </button>
+        </form>
+      </div>
+
+      {createdApiKey ? (
+        <div className="one-time-key" role="status">
+          <div>
+            <strong>{createdApiKey.name}</strong>
+            <span>{createdApiKey.value}</span>
+          </div>
+          <button type="button" onClick={() => void navigator.clipboard.writeText(createdApiKey.value)}>
+            <ClipboardCopy size={16} />
+            Copy
+          </button>
+          <button type="button" onClick={onDismissCreated}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      <div className="table-wrap">
+        <table className="api-key-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Prefix</th>
+              <th>Created</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <ApiKeyRows apiKeys={apiKeys} mode={mode} liveData={liveData} onRevoke={onRevoke} />
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ApiKeyRows({
+  apiKeys,
+  mode,
+  liveData,
+  onRevoke,
+}: {
+  apiKeys: ApiKeyRecord[];
+  mode: LoadMode;
+  liveData: boolean;
+  onRevoke: (apiKeyId: string) => void;
+}) {
+  if (mode === "loading") {
+    return <ApiKeyEmptyRow message="Loading API keys..." />;
+  }
+  if (mode === "error") {
+    return <ApiKeyEmptyRow message="API keys could not be loaded." />;
+  }
+  if (!apiKeys.length) {
+    return <ApiKeyEmptyRow message="No API keys to display." />;
+  }
+  return (
+    <>
+      {apiKeys.map((record) => {
+        const revoked = record.revokedAt !== null;
+        return (
+          <tr key={record.id}>
+            <td>
+              {record.name}
+              {record.isCurrent ? <span className="current-key-label">Current</span> : null}
+            </td>
+            <td>{record.keyPrefix}</td>
+            <td>{record.createdAt}</td>
+            <td>
+              <span className={`status-badge ${revoked ? "revoked" : "active"}`}>{revoked ? "Revoked" : "Active"}</span>
+            </td>
+            <td>
+              <button type="button" disabled={!liveData || revoked || record.isCurrent} onClick={() => onRevoke(record.id)}>
+                <LogOut size={16} />
+                Revoke
+              </button>
+            </td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+function ApiKeyEmptyRow({ message }: { message: string }) {
+  return (
+    <tr>
+      <td colSpan={5}>{message}</td>
+    </tr>
+  );
+}
+
 function AuditHistory({
   events,
   mode,
@@ -787,11 +1055,13 @@ async function loadAnalysisDetail(
   }
 }
 
-async function fetchWithTimeout(url: string, apiKey: string) {
+async function fetchWithTimeout(url: string, apiKey: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${apiKey}`);
+
   const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
+    ...init,
+    headers,
     signal: AbortSignal.timeout(900),
   });
   if (!response.ok) {
@@ -858,6 +1128,17 @@ function normalizeAuditEvent(event: ApiAuditEvent): AuditEvent {
   };
 }
 
+function normalizeApiKey(payload: ApiKeyPayload): ApiKeyRecord {
+  return {
+    id: payload.api_key_id,
+    name: payload.name,
+    keyPrefix: payload.key_prefix,
+    createdAt: formatDate(payload.created_at),
+    revokedAt: payload.revoked_at ? formatDate(payload.revoked_at) : null,
+    isCurrent: payload.is_current,
+  };
+}
+
 function summarizeAuditEvent(action: string, metadata: AuditMetadata) {
   if (action === "analysis.created") {
     const repository = readMetadataText(metadata, "repository") || "Analysis run";
@@ -874,6 +1155,9 @@ function summarizeAuditEvent(action: string, metadata: AuditMetadata) {
   }
   if (action === "api_key.created") {
     return `${readMetadataText(metadata, "api_key_name") || "API key"} created.`;
+  }
+  if (action === "api_key.revoked") {
+    return `${readMetadataText(metadata, "api_key_name") || "API key"} revoked.`;
   }
   if (action === "organization.bootstrapped") {
     return "Self-hosted organization bootstrapped.";

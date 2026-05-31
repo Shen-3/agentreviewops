@@ -6,6 +6,7 @@ Current write events:
 
 - `organization.bootstrapped`
 - `api_key.created`
+- `api_key.revoked`
 - `policy.created`
 - `analysis.created`
 

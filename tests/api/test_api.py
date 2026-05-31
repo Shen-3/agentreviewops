@@ -5,6 +5,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from agentreview_api.auth import key_prefix
 from agentreview_api.db import create_session_factory
 from agentreview_api.main import app, get_session
 from agentreview_api.repository import (
@@ -95,6 +96,88 @@ def test_audit_events_reject_anonymous_requests(client: TestClient) -> None:
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
+
+
+def test_api_key_management_rejects_anonymous_requests(client: TestClient) -> None:
+    client.headers.clear()
+
+    response = client.get("/api/api-keys")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
+
+
+def test_api_key_management_lists_creates_and_revokes_keys(client: TestClient) -> None:
+    list_response = client.get("/api/api-keys")
+
+    assert list_response.status_code == 200
+    initial_keys = list_response.json()
+    assert len(initial_keys) == 1
+    assert initial_keys[0]["name"] == "CI"
+    assert initial_keys[0]["is_current"] is True
+    assert initial_keys[0]["revoked_at"] is None
+    assert "api_key" not in initial_keys[0]
+    assert "key_hash" not in initial_keys[0]
+
+    create_response = client.post("/api/api-keys", json={"name": "Dashboard operator"})
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["api_key_id"]
+    assert created["name"] == "Dashboard operator"
+    assert created["api_key"].startswith("arok_")
+    assert created["key_prefix"] == key_prefix(created["api_key"])
+    assert created["is_current"] is False
+    assert created["revoked_at"] is None
+
+    audit_response = client.get("/api/audit-events", params={"action": "api_key.created"})
+    assert audit_response.status_code == 200
+    audit_event = audit_response.json()[0]
+    assert audit_event["target_id"] == created["api_key_id"]
+    assert audit_event["metadata"] == {
+        "api_key_name": "Dashboard operator",
+        "source": "api",
+    }
+    assert created["api_key"] not in str(audit_event)
+
+    list_response = client.get("/api/api-keys")
+    assert list_response.status_code == 200
+    listed = list_response.json()
+    assert [record["name"] for record in listed] == ["Dashboard operator", "CI"]
+    assert all("api_key" not in record for record in listed)
+    assert all("key_hash" not in record for record in listed)
+
+    revoke_response = client.post(f"/api/api-keys/{created['api_key_id']}/revoke")
+
+    assert revoke_response.status_code == 200
+    revoked = revoke_response.json()
+    assert revoked["api_key_id"] == created["api_key_id"]
+    assert revoked["revoked_at"]
+
+    auth_with_revoked_key = client.get("/api/auth/me", headers={"X-AgentReview-API-Key": created["api_key"]})
+    assert auth_with_revoked_key.status_code == 401
+
+    revoke_audit_response = client.get("/api/audit-events", params={"action": "api_key.revoked"})
+    assert revoke_audit_response.status_code == 200
+    assert revoke_audit_response.json()[0]["metadata"] == {"api_key_name": "Dashboard operator"}
+
+
+def test_api_key_management_blocks_self_revoke_and_cross_org_revoke(client: TestClient) -> None:
+    current_key = client.get("/api/auth/me").json()["api_key_id"]
+
+    self_revoke_response = client.post(f"/api/api-keys/{current_key}/revoke")
+
+    assert self_revoke_response.status_code == 400
+    assert self_revoke_response.json() == {"detail": "Cannot revoke the API key used for this request"}
+
+    with app.state.test_session_factory() as session:
+        other_org = create_organization(session, slug="keys-other", name="Keys Other")
+        other_key, _ = create_api_key(session, organization_id=other_org.id, name="Other org key")
+
+    cross_org_response = client.post(f"/api/api-keys/{other_key.id}/revoke")
+
+    assert cross_org_response.status_code == 404
+    assert cross_org_response.json() == {"detail": "API key not found"}
 
 
 def test_policy_create_list_and_org_override_applies_to_analysis(client: TestClient) -> None:
