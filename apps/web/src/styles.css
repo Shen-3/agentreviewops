@@ -28,13 +28,15 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
 button,
 select,
-input {
+input,
+textarea {
   min-height: 36px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -219,6 +221,8 @@ nav {
 .section-head p,
 .search span,
 .inline-create-form label,
+.policy-form label span,
+.rule-grid legend,
 dt {
   color: var(--muted);
   font-size: 12px;
@@ -239,6 +243,7 @@ dt {
 
 .analysis-list,
 .analysis-detail,
+.policy-panel,
 .api-key-panel,
 .audit-panel {
   min-width: 0;
@@ -381,6 +386,7 @@ dt {
   box-shadow: var(--shadow);
 }
 
+.policy-panel,
 .api-key-panel,
 .audit-panel {
   margin-top: 24px;
@@ -420,6 +426,97 @@ dt {
 
 .audit-toolbar select {
   width: 220px;
+}
+
+.policy-form {
+  display: grid;
+  gap: 14px;
+}
+
+.policy-grid,
+.policy-textareas {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.policy-textareas {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.policy-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.policy-form input,
+.policy-form select,
+.policy-form textarea {
+  width: 100%;
+  padding: 0 10px;
+}
+
+.policy-form textarea {
+  min-height: 150px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.rule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.rule-grid legend {
+  padding: 0 6px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.policy-actions,
+.policy-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.policy-status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.policy-meta {
+  max-width: 320px;
+}
+
+.policy-meta strong,
+.policy-meta span {
+  display: inline-flex;
 }
 
 .one-time-key {
@@ -629,6 +726,9 @@ pre {
   }
 
   .content-grid,
+  .policy-grid,
+  .policy-textareas,
+  .rule-grid,
   .metrics {
     grid-template-columns: 1fr;
   }
@@ -642,6 +742,7 @@ pre {
 
   .topbar,
   .section-head,
+  .policy-actions,
   .row-top,
   .row-meta {
     align-items: stretch;
@@ -669,6 +770,9 @@ pre {
   .api-key-form input,
   .inline-create-form,
   .inline-create-form input,
+  .policy-actions,
+  .policy-actions button,
+  .policy-meta,
   .audit-toolbar,
   .audit-toolbar select,
   .audit-toolbar button,
@@ -679,6 +783,8 @@ pre {
 
   .one-time-key,
   .inline-create-form,
+  .policy-actions,
+  .policy-meta,
   .audit-toolbar {
     align-items: stretch;
     flex-direction: column;

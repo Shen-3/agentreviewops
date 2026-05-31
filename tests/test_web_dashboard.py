@@ -15,6 +15,8 @@ def test_dashboard_contains_required_views() -> None:
     assert "Analysis detail" in app_tsx
     assert "Findings" in app_tsx
     assert "Report preview" in app_tsx
+    assert "Policy editor" in app_tsx
+    assert "Save policy" in app_tsx
     assert "API keys" in app_tsx
     assert "Audit history" in app_tsx
     assert "Download" in app_tsx
@@ -32,9 +34,12 @@ def test_dashboard_contains_empty_loading_error_states() -> None:
     assert "No analysis runs or audit events" in app_tsx
     assert "/api/analysis-runs" in app_tsx
     assert "/api/api-keys" in app_tsx
+    assert "/api/policies" in app_tsx
     assert "/api/audit-events?limit=50" in app_tsx
     assert "/api/audit-events/export" in app_tsx
     assert "API unavailable. Showing demo analysis and audit data." in app_tsx
+    assert "require_tests_for_code_changes" in app_tsx
+    assert "critical_paths" in app_tsx
 
 
 def test_dashboard_has_responsive_styles() -> None:
@@ -43,6 +48,8 @@ def test_dashboard_has_responsive_styles() -> None:
     assert "@media (max-width: 1040px)" in css
     assert "@media (max-width: 640px)" in css
     assert ".risk-badge" in css
+    assert ".policy-panel" in css
+    assert ".policy-form" in css
     assert ".api-key-table" in css
     assert ".audit-table" in css
     assert ".audit-toolbar" in css

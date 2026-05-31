@@ -10,6 +10,7 @@ type LoadMode = "loading" | "ready" | "empty" | "error";
 type DataSource = "api" | "demo";
 type AuditExportFormat = "json" | "csv";
 type AuditMetadata = Record<string, unknown>;
+type RuleId = "require_tests_for_code_changes" | "flag_dependency_changes" | "flag_ci_changes" | "flag_auth_changes" | "flag_large_generated_files";
 
 type Finding = {
   severity: FindingSeverity;
@@ -67,6 +68,43 @@ type ApiKeyRecord = {
 type CreatedApiKey = {
   name: string;
   value: string;
+};
+
+type RulesConfigPayload = Record<RuleId, boolean>;
+
+type PolicyConfigPayload = {
+  version: 1;
+  risk: {
+    fail_level: RiskLevel;
+    large_diff: {
+      max_files: number;
+      max_lines: number;
+    };
+  };
+  critical_paths: string[];
+  test_patterns: string[];
+  rules: RulesConfigPayload;
+};
+
+type PolicyRecord = {
+  id: string;
+  name: string;
+  scope: string;
+  enabled: boolean;
+  config: PolicyConfigPayload;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type PolicyFormState = {
+  name: string;
+  enabled: boolean;
+  failLevel: RiskLevel;
+  maxFiles: string;
+  maxLines: string;
+  criticalPathsText: string;
+  testPatternsText: string;
+  rules: RulesConfigPayload;
 };
 
 type ApiSummary = {
@@ -132,8 +170,55 @@ type ApiKeyCreatePayload = ApiKeyPayload & {
   api_key: string;
 };
 
+type ApiPolicyPayload = {
+  policy_id: string;
+  name: string;
+  scope: string;
+  enabled: boolean;
+  config: PolicyConfigPayload;
+  created_at: string;
+  updated_at: string;
+};
+
 const API_BASE_URL = import.meta.env.VITE_AGENTREVIEW_API_URL || "http://127.0.0.1:8000";
 const API_KEY_STORAGE_KEY = "agentreviewops.apiKey";
+const ruleLabels: Record<RuleId, string> = {
+  require_tests_for_code_changes: "Require tests for code changes",
+  flag_dependency_changes: "Flag dependency changes",
+  flag_ci_changes: "Flag CI changes",
+  flag_auth_changes: "Flag auth changes",
+  flag_large_generated_files: "Flag generated files",
+};
+const defaultPolicyConfig: PolicyConfigPayload = {
+  version: 1,
+  risk: {
+    fail_level: "high",
+    large_diff: {
+      max_files: 20,
+      max_lines: 800,
+    },
+  },
+  critical_paths: [
+    "auth/**",
+    "security/**",
+    "payments/**",
+    "infra/**",
+    ".github/workflows/**",
+    "Dockerfile",
+    "docker-compose.yml",
+    "package.json",
+    "pyproject.toml",
+    "requirements*.txt",
+  ],
+  test_patterns: ["tests/**", "**/*test*", "**/*spec*"],
+  rules: {
+    require_tests_for_code_changes: true,
+    flag_dependency_changes: true,
+    flag_ci_changes: true,
+    flag_auth_changes: true,
+    flag_large_generated_files: true,
+  },
+};
 
 const seededAnalyses: Analysis[] = [
   {
@@ -312,10 +397,25 @@ const seededApiKeys: ApiKeyRecord[] = [
   },
 ];
 
+const seededPolicies: PolicyRecord[] = [
+  {
+    id: "policy_default",
+    name: "Default review policy",
+    scope: "organization",
+    enabled: true,
+    config: defaultPolicyConfig,
+    createdAt: "05/23/2026, 10:42",
+    updatedAt: "05/23/2026, 10:42",
+  },
+];
+
 function Dashboard() {
   const [analyses, setAnalyses] = React.useState<Analysis[]>([]);
   const [auditEvents, setAuditEvents] = React.useState<AuditEvent[]>([]);
   const [apiKeys, setApiKeys] = React.useState<ApiKeyRecord[]>([]);
+  const [policies, setPolicies] = React.useState<PolicyRecord[]>([]);
+  const [policyForm, setPolicyForm] = React.useState<PolicyFormState>(() => policyToForm(seededPolicies[0]));
+  const [policyStatus, setPolicyStatus] = React.useState("");
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [mode, setMode] = React.useState<LoadMode>("loading");
   const [dataSource, setDataSource] = React.useState<DataSource>("api");
@@ -333,6 +433,8 @@ function Dashboard() {
       setAnalyses(seededAnalyses);
       setAuditEvents(seededAuditEvents);
       setApiKeys(seededApiKeys);
+      setPolicies(seededPolicies);
+      setPolicyForm(policyToForm(seededPolicies[0]));
       setCreatedApiKey(null);
       setSelectedId(seededAnalyses[0].id);
       setDataSource("demo");
@@ -340,22 +442,27 @@ function Dashboard() {
       return;
     }
     try {
-      const [analysisResponse, auditResponse, apiKeysResponse] = await Promise.all([
+      const [analysisResponse, auditResponse, apiKeysResponse, policiesResponse] = await Promise.all([
         fetchWithTimeout(`${API_BASE_URL}/api/analysis-runs`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/audit-events?limit=50`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/api-keys`, apiKey),
+        fetchWithTimeout(`${API_BASE_URL}/api/policies`, apiKey),
       ]);
       const summaries = (await analysisResponse.json()) as ApiSummary[];
       const auditPayload = (await auditResponse.json()) as ApiAuditEvent[];
       const apiKeyPayload = (await apiKeysResponse.json()) as ApiKeyPayload[];
+      const policyPayload = (await policiesResponse.json()) as ApiPolicyPayload[];
       const normalized = summaries.map(normalizeSummary);
       const normalizedAudit = auditPayload.map(normalizeAuditEvent);
       const normalizedApiKeys = apiKeyPayload.map(normalizeApiKey);
+      const normalizedPolicies = policyPayload.map(normalizePolicy);
       setAnalyses(normalized);
       setAuditEvents(normalizedAudit);
       setApiKeys(normalizedApiKeys);
+      setPolicies(normalizedPolicies);
+      setPolicyForm(policyToForm(normalizedPolicies[0] ?? seededPolicies[0]));
       setDataSource("api");
-      setMode(normalized.length || normalizedAudit.length || normalizedApiKeys.length ? "ready" : "empty");
+      setMode(normalized.length || normalizedAudit.length || normalizedApiKeys.length || normalizedPolicies.length ? "ready" : "empty");
       setSelectedId(normalized[0]?.id ?? null);
       if (normalized[0]) {
         void loadAnalysisDetail(normalized[0].id, apiKey, setAnalyses, setMode);
@@ -370,6 +477,8 @@ function Dashboard() {
       setAnalyses(seededAnalyses);
       setAuditEvents(seededAuditEvents);
       setApiKeys(seededApiKeys);
+      setPolicies(seededPolicies);
+      setPolicyForm(policyToForm(seededPolicies[0]));
       setCreatedApiKey(null);
       setSelectedId(seededAnalyses[0].id);
       setDataSource("demo");
@@ -422,6 +531,9 @@ function Dashboard() {
     setAnalyses(seededAnalyses);
     setAuditEvents(seededAuditEvents);
     setApiKeys(seededApiKeys);
+    setPolicies(seededPolicies);
+    setPolicyForm(policyToForm(seededPolicies[0]));
+    setPolicyStatus("");
     setCreatedApiKey(null);
     setSelectedId(seededAnalyses[0].id);
     setDataSource("demo");
@@ -471,6 +583,47 @@ function Dashboard() {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
       }
+      setMode("error");
+    }
+  };
+  const saveDashboardPolicy = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    const config = policyConfigFromForm(policyForm);
+    if (!policyForm.name.trim()) {
+      setPolicyStatus("Policy name is required.");
+      return;
+    }
+    if (!config) {
+      setPolicyStatus("Large diff thresholds must be positive whole numbers.");
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/policies`, apiKey, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: policyForm.name.trim(),
+          enabled: policyForm.enabled,
+          scope: "organization",
+          config,
+        }),
+      });
+      const saved = normalizePolicy((await response.json()) as ApiPolicyPayload);
+      setPolicies((current) => [saved, ...current]);
+      setPolicyForm(policyToForm(saved));
+      setPolicyStatus("Policy saved. New analyses will use the latest enabled policy.");
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+      }
+      setPolicyStatus("Policy could not be saved.");
       setMode("error");
     }
   };
@@ -624,6 +777,16 @@ function Dashboard() {
 
           <AnalysisDetail selected={selected} />
         </section>
+
+        <PolicyEditor
+          policies={policies}
+          form={policyForm}
+          mode={mode}
+          dataSource={dataSource}
+          status={policyStatus}
+          onFormChange={setPolicyForm}
+          onSave={saveDashboardPolicy}
+        />
 
         <ApiKeyAdmin
           apiKeys={apiKeys}
@@ -811,6 +974,144 @@ function ReportPreview({ report }: { report: string }) {
         </button>
       </div>
       <pre tabIndex={0}>{report}</pre>
+    </section>
+  );
+}
+
+function PolicyEditor({
+  policies,
+  form,
+  mode,
+  dataSource,
+  status,
+  onFormChange,
+  onSave,
+}: {
+  policies: PolicyRecord[];
+  form: PolicyFormState;
+  mode: LoadMode;
+  dataSource: DataSource;
+  status: string;
+  onFormChange: React.Dispatch<React.SetStateAction<PolicyFormState>>;
+  onSave: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  const liveData = dataSource === "api";
+  const activePolicy = policies.find((policy) => policy.enabled) ?? policies[0] ?? null;
+  const updateRule = (rule: RuleId, enabled: boolean) => {
+    onFormChange((current) => ({
+      ...current,
+      rules: {
+        ...current.rules,
+        [rule]: enabled,
+      },
+    }));
+  };
+
+  return (
+    <section className="policy-panel" id="policies" aria-labelledby="policy-editor-title">
+      <div className="section-head">
+        <div>
+          <p className="eyebrow">Policy control</p>
+          <h2 id="policy-editor-title">Policy editor</h2>
+          <p>Save a new organization policy version for future analyses.</p>
+        </div>
+        {activePolicy ? (
+          <div className="policy-meta" aria-label="Current active policy">
+            <span className={`status-badge ${activePolicy.enabled ? "active" : "revoked"}`}>{activePolicy.enabled ? "Active" : "Disabled"}</span>
+            <strong>{activePolicy.name}</strong>
+            <span>{activePolicy.updatedAt}</span>
+          </div>
+        ) : null}
+      </div>
+
+      <form className="policy-form" onSubmit={onSave}>
+        <div className="policy-grid">
+          <label>
+            <span>Policy name</span>
+            <input
+              value={form.name}
+              onChange={(event) => onFormChange((current) => ({ ...current, name: event.target.value }))}
+              disabled={!liveData}
+              placeholder="Default review policy"
+            />
+          </label>
+          <label>
+            <span>Fail level</span>
+            <select value={form.failLevel} onChange={(event) => onFormChange((current) => ({ ...current, failLevel: event.target.value as RiskLevel }))} disabled={!liveData}>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="block">Block</option>
+            </select>
+          </label>
+          <label>
+            <span>Large diff files</span>
+            <input
+              value={form.maxFiles}
+              onChange={(event) => onFormChange((current) => ({ ...current, maxFiles: event.target.value }))}
+              disabled={!liveData}
+              inputMode="numeric"
+            />
+          </label>
+          <label>
+            <span>Large diff lines</span>
+            <input
+              value={form.maxLines}
+              onChange={(event) => onFormChange((current) => ({ ...current, maxLines: event.target.value }))}
+              disabled={!liveData}
+              inputMode="numeric"
+            />
+          </label>
+        </div>
+
+        <div className="policy-textareas">
+          <label>
+            <span>Critical paths</span>
+            <textarea
+              value={form.criticalPathsText}
+              onChange={(event) => onFormChange((current) => ({ ...current, criticalPathsText: event.target.value }))}
+              disabled={!liveData}
+              rows={7}
+            />
+          </label>
+          <label>
+            <span>Test patterns</span>
+            <textarea
+              value={form.testPatternsText}
+              onChange={(event) => onFormChange((current) => ({ ...current, testPatternsText: event.target.value }))}
+              disabled={!liveData}
+              rows={7}
+            />
+          </label>
+        </div>
+
+        <fieldset className="rule-grid">
+          <legend>Rules</legend>
+          {(Object.keys(ruleLabels) as RuleId[]).map((rule) => (
+            <label className="checkbox-row" key={rule}>
+              <input type="checkbox" checked={form.rules[rule]} onChange={(event) => updateRule(rule, event.target.checked)} disabled={!liveData} />
+              <span>{ruleLabels[rule]}</span>
+            </label>
+          ))}
+        </fieldset>
+
+        <div className="policy-actions">
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={form.enabled}
+              onChange={(event) => onFormChange((current) => ({ ...current, enabled: event.target.checked }))}
+              disabled={!liveData}
+            />
+            <span>Save as enabled</span>
+          </label>
+          {status ? <span className="policy-status">{status}</span> : null}
+          <button className="primary" type="submit" disabled={!liveData || mode === "loading"}>
+            <ShieldCheck size={16} />
+            Save policy
+          </button>
+        </div>
+      </form>
     </section>
   );
 }
@@ -1197,6 +1498,90 @@ function normalizeApiKey(payload: ApiKeyPayload): ApiKeyRecord {
     revokedAt: payload.revoked_at ? formatDate(payload.revoked_at) : null,
     isCurrent: payload.is_current,
   };
+}
+
+function normalizePolicy(payload: ApiPolicyPayload): PolicyRecord {
+  return {
+    id: payload.policy_id,
+    name: payload.name,
+    scope: payload.scope,
+    enabled: payload.enabled,
+    config: normalizePolicyConfig(payload.config),
+    createdAt: formatDate(payload.created_at),
+    updatedAt: formatDate(payload.updated_at),
+  };
+}
+
+function normalizePolicyConfig(config: PolicyConfigPayload): PolicyConfigPayload {
+  return {
+    version: 1,
+    risk: {
+      fail_level: config.risk?.fail_level ?? defaultPolicyConfig.risk.fail_level,
+      large_diff: {
+        max_files: config.risk?.large_diff?.max_files ?? defaultPolicyConfig.risk.large_diff.max_files,
+        max_lines: config.risk?.large_diff?.max_lines ?? defaultPolicyConfig.risk.large_diff.max_lines,
+      },
+    },
+    critical_paths: config.critical_paths ?? defaultPolicyConfig.critical_paths,
+    test_patterns: config.test_patterns ?? defaultPolicyConfig.test_patterns,
+    rules: {
+      ...defaultPolicyConfig.rules,
+      ...config.rules,
+    },
+  };
+}
+
+function policyToForm(policy: PolicyRecord): PolicyFormState {
+  return {
+    name: policy.name,
+    enabled: policy.enabled,
+    failLevel: policy.config.risk.fail_level,
+    maxFiles: String(policy.config.risk.large_diff.max_files),
+    maxLines: String(policy.config.risk.large_diff.max_lines),
+    criticalPathsText: policy.config.critical_paths.join("\n"),
+    testPatternsText: policy.config.test_patterns.join("\n"),
+    rules: {
+      ...policy.config.rules,
+    },
+  };
+}
+
+function policyConfigFromForm(form: PolicyFormState): PolicyConfigPayload | null {
+  const maxFiles = parsePositiveInteger(form.maxFiles);
+  const maxLines = parsePositiveInteger(form.maxLines);
+  if (maxFiles === null || maxLines === null) {
+    return null;
+  }
+  return {
+    version: 1,
+    risk: {
+      fail_level: form.failLevel,
+      large_diff: {
+        max_files: maxFiles,
+        max_lines: maxLines,
+      },
+    },
+    critical_paths: parsePatternLines(form.criticalPathsText),
+    test_patterns: parsePatternLines(form.testPatternsText),
+    rules: {
+      ...form.rules,
+    },
+  };
+}
+
+function parsePositiveInteger(value: string) {
+  const normalized = value.trim();
+  if (!/^[1-9]\d*$/.test(normalized)) {
+    return null;
+  }
+  return Number(normalized);
+}
+
+function parsePatternLines(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function summarizeAuditEvent(action: string, metadata: AuditMetadata) {

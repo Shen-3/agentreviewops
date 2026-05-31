@@ -8,7 +8,7 @@ Use it when your team uses Cursor, Copilot, Devin, Codex, Claude Code, or other 
 
 ## Current Status
 
-This repository is at the CLI/API/dashboard foundation stage. It provides a Typer-based `agentreview` command that can scan a unified diff or GitHub pull request, apply deterministic risk rules, persist analysis runs and audit events through FastAPI, and show them in a read-only React dashboard.
+This repository is at the CLI/API/dashboard foundation stage. It provides a Typer-based `agentreview` command that can scan a unified diff or GitHub pull request, apply deterministic risk rules, persist analysis runs and audit events through FastAPI, and manage the self-hosted review control plane from a React dashboard.
 
 GitHub Action usage is documented for artifact-based reports. Multi-tenant auth foundations and an offline AI provider interface exist; hosted deployment and real LLM providers are intentionally not implemented yet.
 
@@ -121,7 +121,7 @@ This starts PostgreSQL, the FastAPI API on `127.0.0.1:8000`, and the dashboard o
 
 ## Web Dashboard
 
-A React + TypeScript + Vite read-only dashboard lives in `apps/web`.
+A React + TypeScript + Vite dashboard lives in `apps/web`.
 
 Run it locally:
 
@@ -133,7 +133,7 @@ npm run dev
 
 Then open `http://127.0.0.1:5173`.
 
-The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes analysis list, selected analysis detail, risk badges, findings table, report preview, API key management, audit history with JSON/CSV export, and loading/error/empty states.
+The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes analysis list, selected analysis detail, risk badges, findings table, report preview, organization policy editor, API key management, audit history with JSON/CSV export, and loading/error/empty states.
 
 ## Sample Config
 
@@ -174,7 +174,6 @@ The built-in example plugin demonstrates the contract by flagging dependency man
 
 ## Roadmap
 
-- Add frontend policy editor.
 - Add real AI providers behind explicit opt-in configuration.
 - Add plugin discovery/loading from installed packages.
 
