@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from typing import Literal
 
@@ -22,6 +22,7 @@ from agentreview_api.audit import (
     AUDIT_ACTION_API_KEY_CREATED,
     AUDIT_ACTION_API_KEY_REVOKED,
     AUDIT_ACTION_POLICY_CREATED,
+    AUDIT_ACTION_RETENTION_PURGED,
 )
 from agentreview_api.auth import AuthContext, require_api_key
 from agentreview_api.db import get_session
@@ -30,12 +31,14 @@ from agentreview_api.repository import (
     create_api_key,
     create_audit_event,
     create_policy,
+    count_retention_candidates,
     get_analysis_run,
     get_enabled_policy,
     list_analysis_runs,
     list_api_keys,
     list_audit_events,
     list_policies,
+    purge_retention_records,
     revoke_api_key,
     to_diff_files,
     to_risk_findings,
@@ -165,6 +168,24 @@ class AuditEventResponse(BaseModel):
     target_type: str
     target_id: str | None
     metadata: dict
+
+
+class RetentionPurgeRequest(BaseModel):
+    older_than_days: int = Field(ge=1, le=3650, description="Delete records older than this many days.")
+    include_analysis_runs: bool = Field(default=True, description="Include stored analysis reports and findings.")
+    include_audit_events: bool = Field(default=False, description="Include audit events older than the cutoff.")
+    dry_run: bool = Field(default=True, description="When true, only count matching records.")
+    confirm: bool = Field(default=False, description="Must be true when dry_run is false.")
+
+
+class RetentionPurgeResponse(BaseModel):
+    cutoff: datetime
+    older_than_days: int
+    dry_run: bool
+    include_analysis_runs: bool
+    include_audit_events: bool
+    analysis_run_count: int
+    audit_event_count: int
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -337,6 +358,69 @@ def export_audit_events(
             }
         )
     return Response(content=output.getvalue(), media_type="text/csv", headers=headers)
+
+
+@app.post("/api/retention/purge", response_model=RetentionPurgeResponse)
+def purge_retention(
+    request: RetentionPurgeRequest,
+    auth: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> RetentionPurgeResponse:
+    if not request.include_analysis_runs and not request.include_audit_events:
+        raise HTTPException(status_code=422, detail="At least one retention target must be enabled")
+    if not request.dry_run and not request.confirm:
+        raise HTTPException(status_code=400, detail="Set confirm=true to run a non-dry-run retention purge")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=request.older_than_days)
+    if request.dry_run:
+        candidate_analysis_count, candidate_audit_count = count_retention_candidates(
+            session,
+            organization_id=auth.organization_id,
+            before=cutoff,
+        )
+        return RetentionPurgeResponse(
+            cutoff=cutoff,
+            older_than_days=request.older_than_days,
+            dry_run=True,
+            include_analysis_runs=request.include_analysis_runs,
+            include_audit_events=request.include_audit_events,
+            analysis_run_count=candidate_analysis_count if request.include_analysis_runs else 0,
+            audit_event_count=candidate_audit_count if request.include_audit_events else 0,
+        )
+
+    analysis_count, audit_count = purge_retention_records(
+        session,
+        organization_id=auth.organization_id,
+        before=cutoff,
+        include_analysis_runs=request.include_analysis_runs,
+        include_audit_events=request.include_audit_events,
+    )
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_RETENTION_PURGED,
+        target_type="organization",
+        target_id=auth.organization_id,
+        metadata={
+            "older_than_days": request.older_than_days,
+            "cutoff": cutoff.isoformat(),
+            "include_analysis_runs": request.include_analysis_runs,
+            "include_audit_events": request.include_audit_events,
+            "analysis_run_count": analysis_count,
+            "audit_event_count": audit_count,
+        },
+    )
+    return RetentionPurgeResponse(
+        cutoff=cutoff,
+        older_than_days=request.older_than_days,
+        dry_run=False,
+        include_analysis_runs=request.include_analysis_runs,
+        include_audit_events=request.include_audit_events,
+        analysis_run_count=analysis_count,
+        audit_event_count=audit_count,
+    )
 
 
 @app.get("/api/policies", response_model=list[PolicyResponse])

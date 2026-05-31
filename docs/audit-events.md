@@ -9,6 +9,7 @@ Current write events:
 - `api_key.revoked`
 - `policy.created`
 - `analysis.created`
+- `retention.purged`
 
 Protected endpoint:
 

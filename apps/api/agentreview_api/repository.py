@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from agentreview.models import AgentReviewConfig, DiffFile, RiskAnalysis, RiskFinding
@@ -321,6 +321,72 @@ def get_analysis_run(session: Session, analysis_run_id: str, *, organization_id:
     if organization_id is not None:
         statement = statement.where(AnalysisRunRecord.organization_id == organization_id)
     return session.scalar(statement)
+
+
+def count_retention_candidates(session: Session, *, organization_id: str, before: datetime) -> tuple[int, int]:
+    analysis_count = session.scalar(
+        select(func.count())
+        .select_from(AnalysisRunRecord)
+        .where(
+            AnalysisRunRecord.organization_id == organization_id,
+            AnalysisRunRecord.created_at < before,
+        )
+    )
+    audit_count = session.scalar(
+        select(func.count())
+        .select_from(AuditEventRecord)
+        .where(
+            AuditEventRecord.organization_id == organization_id,
+            AuditEventRecord.created_at < before,
+        )
+    )
+    return int(analysis_count or 0), int(audit_count or 0)
+
+
+def purge_retention_records(
+    session: Session,
+    *,
+    organization_id: str,
+    before: datetime,
+    include_analysis_runs: bool,
+    include_audit_events: bool,
+) -> tuple[int, int]:
+    analysis_count = 0
+    audit_count = 0
+
+    if include_analysis_runs:
+        analysis_runs = list(
+            session.scalars(
+                select(AnalysisRunRecord)
+                .where(
+                    AnalysisRunRecord.organization_id == organization_id,
+                    AnalysisRunRecord.created_at < before,
+                )
+                .options(
+                    selectinload(AnalysisRunRecord.changed_files),
+                    selectinload(AnalysisRunRecord.findings),
+                )
+            ).all()
+        )
+        analysis_count = len(analysis_runs)
+        for record in analysis_runs:
+            session.delete(record)
+
+    if include_audit_events:
+        audit_events = list(
+            session.scalars(
+                select(AuditEventRecord).where(
+                    AuditEventRecord.organization_id == organization_id,
+                    AuditEventRecord.created_at < before,
+                )
+            ).all()
+        )
+        audit_count = len(audit_events)
+        for record in audit_events:
+            session.delete(record)
+
+    session.commit()
+    return analysis_count, audit_count
 
 
 def to_diff_files(record: AnalysisRunRecord) -> list[DiffFile]:

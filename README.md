@@ -51,6 +51,7 @@ Implemented endpoints:
 - `POST /api/api-keys/{api_key_id}/revoke`
 - `GET /api/audit-events`
 - `GET /api/audit-events/export`
+- `POST /api/retention/purge`
 - `GET /api/policies`
 - `POST /api/policies`
 - `POST /api/analyze/diff`
@@ -156,6 +157,8 @@ The current AI module is a provider abstraction with secret redaction and fake-p
 
 Audit events are organization-scoped and available at `GET /api/audit-events`. Export filtered evidence with `GET /api/audit-events/export?format=json` or `format=csv`. AgentReviewOps records summary-only events for bootstrap, API key creation/revocation, policy creation, and analysis creation. See [audit event docs](docs/audit-events.md).
 
+Retention purges are available at `POST /api/retention/purge`. The endpoint defaults to dry-run mode and requires `confirm=true` for deletion, then records a `retention.purged` audit event with summary counts.
+
 Analyzer plugins are disabled by default. A plugin must be enabled by ID and granted explicit permissions:
 
 ```yaml
@@ -172,7 +175,6 @@ The built-in example plugin demonstrates the contract by flagging dependency man
 ## Roadmap
 
 - Add frontend policy editor.
-- Add retention controls.
 - Add real AI providers behind explicit opt-in configuration.
 - Add plugin discovery/loading from installed packages.
 

@@ -1,5 +1,6 @@
 import csv
 import json
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 
@@ -7,9 +8,10 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from agentreview_api.auth import key_prefix
-from agentreview_api.db import create_session_factory
+from agentreview_api.db import AnalysisRunRecord, AuditEventRecord, create_session_factory
 from agentreview_api.main import app, get_session
 from agentreview_api.repository import (
     create_api_key,
@@ -437,6 +439,111 @@ def test_audit_events_export_json_and_csv_are_scoped_filtered_and_sanitized(clie
     assert rows[0]["metadata"] == '{"enabled":true,"policy_name":"Exported policy","scope":"organization"}'
     assert "Other policy" not in csv_response.text
     assert "do-not-export" not in csv_response.text
+
+
+def test_retention_purge_rejects_anonymous_requests(client: TestClient) -> None:
+    client.headers.clear()
+
+    response = client.post("/api/retention/purge", json={"older_than_days": 30})
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
+
+
+def test_retention_purge_dry_run_and_confirmed_delete(client: TestClient) -> None:
+    diff_text = (PROJECT_ROOT / "examples" / "sample.diff").read_text(encoding="utf-8")
+    create_response = client.post(
+        "/api/analyze/diff",
+        json={
+            "diff": diff_text,
+            "repository": "platform/checkout-api",
+        },
+    )
+    assert create_response.status_code == 200
+    analysis_run_id = create_response.json()["analysis_run_id"]
+    old_timestamp = datetime.now(timezone.utc) - timedelta(days=45)
+
+    with app.state.test_session_factory() as session:
+        analysis_run = session.get(AnalysisRunRecord, analysis_run_id)
+        assert analysis_run is not None
+        analysis_run.created_at = old_timestamp
+        analysis_audit = session.scalar(select(AuditEventRecord).where(AuditEventRecord.target_id == analysis_run_id))
+        assert analysis_audit is not None
+        analysis_audit.created_at = old_timestamp
+        old_audit = create_audit_event(
+            session,
+            organization_id=analysis_run.organization_id,
+            actor_type="api_key",
+            actor_id="old-key",
+            action="policy.created",
+            target_type="policy",
+            target_id="old-policy",
+            metadata={"policy_name": "Old policy"},
+        )
+        old_audit.created_at = old_timestamp
+        session.add_all([analysis_run, analysis_audit, old_audit])
+        session.commit()
+
+    dry_run_response = client.post(
+        "/api/retention/purge",
+        json={
+            "older_than_days": 30,
+            "include_analysis_runs": True,
+            "include_audit_events": True,
+        },
+    )
+
+    assert dry_run_response.status_code == 200
+    dry_run = dry_run_response.json()
+    assert dry_run["dry_run"] is True
+    assert dry_run["analysis_run_count"] == 1
+    assert dry_run["audit_event_count"] == 2
+
+    detail_response = client.get(f"/api/analysis-runs/{analysis_run_id}")
+    assert detail_response.status_code == 200
+
+    unconfirmed_response = client.post(
+        "/api/retention/purge",
+        json={
+            "older_than_days": 30,
+            "include_analysis_runs": True,
+            "include_audit_events": True,
+            "dry_run": False,
+        },
+    )
+    assert unconfirmed_response.status_code == 400
+    assert unconfirmed_response.json() == {"detail": "Set confirm=true to run a non-dry-run retention purge"}
+
+    purge_response = client.post(
+        "/api/retention/purge",
+        json={
+            "older_than_days": 30,
+            "include_analysis_runs": True,
+            "include_audit_events": True,
+            "dry_run": False,
+            "confirm": True,
+        },
+    )
+
+    assert purge_response.status_code == 200
+    purge = purge_response.json()
+    assert purge["dry_run"] is False
+    assert purge["analysis_run_count"] == 1
+    assert purge["audit_event_count"] == 2
+
+    detail_response = client.get(f"/api/analysis-runs/{analysis_run_id}")
+    assert detail_response.status_code == 404
+
+    old_audit_response = client.get("/api/audit-events", params={"target_id": "old-policy"})
+    assert old_audit_response.status_code == 200
+    assert old_audit_response.json() == []
+
+    retention_audit_response = client.get("/api/audit-events", params={"action": "retention.purged"})
+    assert retention_audit_response.status_code == 200
+    retention_event = retention_audit_response.json()[0]
+    assert retention_event["metadata"]["older_than_days"] == 30
+    assert retention_event["metadata"]["analysis_run_count"] == 1
+    assert retention_event["metadata"]["audit_event_count"] == 2
 
 
 def test_report_fetch_returns_404_for_missing_run(client: TestClient) -> None:

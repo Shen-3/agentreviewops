@@ -8,6 +8,7 @@ AUDIT_ACTION_API_KEY_CREATED = "api_key.created"
 AUDIT_ACTION_API_KEY_REVOKED = "api_key.revoked"
 AUDIT_ACTION_ORGANIZATION_BOOTSTRAPPED = "organization.bootstrapped"
 AUDIT_ACTION_POLICY_CREATED = "policy.created"
+AUDIT_ACTION_RETENTION_PURGED = "retention.purged"
 
 MAX_METADATA_BYTES = 4096
 
