@@ -17,6 +17,7 @@ def test_dashboard_contains_required_views() -> None:
     assert "Report preview" in app_tsx
     assert "API keys" in app_tsx
     assert "Audit history" in app_tsx
+    assert "Download" in app_tsx
     assert "riskFilter" in app_tsx
     assert "auditActionFilter" in app_tsx
     assert "API key" in app_tsx
@@ -32,6 +33,7 @@ def test_dashboard_contains_empty_loading_error_states() -> None:
     assert "/api/analysis-runs" in app_tsx
     assert "/api/api-keys" in app_tsx
     assert "/api/audit-events?limit=50" in app_tsx
+    assert "/api/audit-events/export" in app_tsx
     assert "API unavailable. Showing demo analysis and audit data." in app_tsx
 
 
@@ -43,3 +45,4 @@ def test_dashboard_has_responsive_styles() -> None:
     assert ".risk-badge" in css
     assert ".api-key-table" in css
     assert ".audit-table" in css
+    assert ".audit-toolbar" in css

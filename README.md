@@ -50,6 +50,7 @@ Implemented endpoints:
 - `POST /api/api-keys`
 - `POST /api/api-keys/{api_key_id}/revoke`
 - `GET /api/audit-events`
+- `GET /api/audit-events/export`
 - `GET /api/policies`
 - `POST /api/policies`
 - `POST /api/analyze/diff`
@@ -131,7 +132,7 @@ npm run dev
 
 Then open `http://127.0.0.1:5173`.
 
-The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes analysis list, selected analysis detail, risk badges, findings table, report preview, API key management, audit history, and loading/error/empty states.
+The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes analysis list, selected analysis detail, risk badges, findings table, report preview, API key management, audit history with JSON/CSV export, and loading/error/empty states.
 
 ## Sample Config
 
@@ -153,7 +154,7 @@ ai:
 
 The current AI module is a provider abstraction with secret redaction and fake-provider tests. It does not call external LLM APIs.
 
-Audit events are organization-scoped and available at `GET /api/audit-events`. AgentReviewOps records summary-only events for bootstrap, API key creation/revocation, policy creation, and analysis creation. See [audit event docs](docs/audit-events.md).
+Audit events are organization-scoped and available at `GET /api/audit-events`. Export filtered evidence with `GET /api/audit-events/export?format=json` or `format=csv`. AgentReviewOps records summary-only events for bootstrap, API key creation/revocation, policy creation, and analysis creation. See [audit event docs](docs/audit-events.md).
 
 Analyzer plugins are disabled by default. A plugin must be enabled by ID and granted explicit permissions:
 
@@ -171,7 +172,7 @@ The built-in example plugin demonstrates the contract by flagging dependency man
 ## Roadmap
 
 - Add frontend policy editor.
-- Add audit export and retention controls.
+- Add retention controls.
 - Add real AI providers behind explicit opt-in configuration.
 - Add plugin discovery/loading from installed packages.
 

@@ -410,6 +410,18 @@ dt {
   padding: 0 10px;
 }
 
+.audit-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.audit-toolbar select {
+  width: 220px;
+}
+
 .one-time-key {
   display: flex;
   align-items: center;
@@ -657,13 +669,17 @@ pre {
   .api-key-form input,
   .inline-create-form,
   .inline-create-form input,
+  .audit-toolbar,
+  .audit-toolbar select,
+  .audit-toolbar button,
   .one-time-key button,
   .nav-link {
     width: 100%;
   }
 
   .one-time-key,
-  .inline-create-form {
+  .inline-create-form,
+  .audit-toolbar {
     align-items: stretch;
     flex-direction: column;
   }

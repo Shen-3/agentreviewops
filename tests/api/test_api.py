@@ -1,3 +1,6 @@
+import csv
+import json
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -386,6 +389,54 @@ def test_audit_events_are_scoped_to_authenticated_organization(client: TestClien
     actions = {event["action"] for event in response.json()}
     assert "policy.created" in actions
     assert "other.created" not in actions
+
+
+def test_audit_events_export_json_and_csv_are_scoped_filtered_and_sanitized(client: TestClient) -> None:
+    policy_response = client.post(
+        "/api/policies",
+        json={
+            "name": "Exported policy",
+            "config": {"version": 1},
+        },
+    )
+    assert policy_response.status_code == 200
+
+    with app.state.test_session_factory() as session:
+        other_org = create_organization(session, slug="export-other", name="Export Other")
+        create_audit_event(
+            session,
+            organization_id=other_org.id,
+            actor_type="system",
+            actor_id=None,
+            action="policy.created",
+            target_type="policy",
+            target_id="other-policy",
+            metadata={
+                "policy_name": "Other policy",
+                "token": "do-not-export",
+            },
+        )
+
+    json_response = client.get("/api/audit-events/export", params={"format": "json", "action": "policy.created"})
+
+    assert json_response.status_code == 200
+    assert json_response.headers["content-disposition"] == 'attachment; filename="agentreview-audit-events.json"'
+    json_events = json_response.json()
+    assert [event["action"] for event in json_events] == ["policy.created"]
+    assert json_events[0]["metadata"]["policy_name"] == "Exported policy"
+    assert "Other policy" not in json.dumps(json_events)
+    assert "do-not-export" not in json.dumps(json_events)
+
+    csv_response = client.get("/api/audit-events/export", params={"format": "csv", "action": "policy.created"})
+
+    assert csv_response.status_code == 200
+    assert csv_response.headers["content-type"].startswith("text/csv")
+    rows = list(csv.DictReader(StringIO(csv_response.text)))
+    assert len(rows) == 1
+    assert rows[0]["action"] == "policy.created"
+    assert rows[0]["metadata"] == '{"enabled":true,"policy_name":"Exported policy","scope":"organization"}'
+    assert "Other policy" not in csv_response.text
+    assert "do-not-export" not in csv_response.text
 
 
 def test_report_fetch_returns_404_for_missing_run(client: TestClient) -> None:

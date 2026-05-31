@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import csv
+import json
 from datetime import datetime
+from io import StringIO
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -268,6 +274,69 @@ def get_audit_events(
             until=until,
         )
     ]
+
+
+@app.get("/api/audit-events/export")
+def export_audit_events(
+    format: Literal["json", "csv"] = Query(default="json"),
+    limit: int = Query(default=500, ge=1, le=500),
+    action: str | None = Query(default=None),
+    target_type: str | None = Query(default=None),
+    target_id: str | None = Query(default=None),
+    actor_type: str | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    auth: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> Response:
+    events = [
+        _audit_event_response(record)
+        for record in list_audit_events(
+            session,
+            organization_id=auth.organization_id,
+            limit=limit,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            actor_type=actor_type,
+            since=since,
+            until=until,
+        )
+    ]
+    filename = f"agentreview-audit-events.{format}"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if format == "json":
+        return JSONResponse(content=jsonable_encoder(events), headers=headers)
+
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "audit_event_id",
+            "created_at",
+            "actor_type",
+            "actor_id",
+            "action",
+            "target_type",
+            "target_id",
+            "metadata",
+        ],
+    )
+    writer.writeheader()
+    for event in events:
+        writer.writerow(
+            {
+                "audit_event_id": event.audit_event_id,
+                "created_at": event.created_at.isoformat(),
+                "actor_type": event.actor_type,
+                "actor_id": event.actor_id or "",
+                "action": event.action,
+                "target_type": event.target_type,
+                "target_id": event.target_id or "",
+                "metadata": json.dumps(event.metadata, sort_keys=True, separators=(",", ":")),
+            }
+        )
+    return Response(content=output.getvalue(), media_type="text/csv", headers=headers)
 
 
 @app.get("/api/policies", response_model=list[PolicyResponse])

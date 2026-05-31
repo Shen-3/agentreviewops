@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { AlertTriangle, ClipboardCopy, Database, KeyRound, LogOut, RefreshCcw, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ClipboardCopy, Database, Download, KeyRound, LogOut, RefreshCcw, Search, ShieldCheck } from "lucide-react";
 
 import "./styles.css";
 
@@ -8,6 +8,7 @@ type RiskLevel = "low" | "medium" | "high" | "block";
 type FindingSeverity = "info" | "low" | "medium" | "high" | "critical";
 type LoadMode = "loading" | "ready" | "empty" | "error";
 type DataSource = "api" | "demo";
+type AuditExportFormat = "json" | "csv";
 type AuditMetadata = Record<string, unknown>;
 
 type Finding = {
@@ -473,6 +474,29 @@ function Dashboard() {
       setMode("error");
     }
   };
+  const exportAuditEvents = async (format: AuditExportFormat) => {
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(buildAuditExportUrl(auditActionFilter, format), apiKey);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = buildAuditExportFilename(auditActionFilter, format);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+      }
+      setMode("error");
+    }
+  };
 
   return (
     <div className="app-shell">
@@ -616,9 +640,11 @@ function Dashboard() {
         <AuditHistory
           events={filteredAuditEvents}
           mode={mode}
+          dataSource={dataSource}
           actionFilter={auditActionFilter}
           actionOptions={auditActionOptions}
           onActionFilterChange={setAuditActionFilter}
+          onExport={(format) => void exportAuditEvents(format)}
         />
       </main>
     </div>
@@ -930,16 +956,21 @@ function ApiKeyEmptyRow({ message }: { message: string }) {
 function AuditHistory({
   events,
   mode,
+  dataSource,
   actionFilter,
   actionOptions,
   onActionFilterChange,
+  onExport,
 }: {
   events: AuditEvent[];
   mode: LoadMode;
+  dataSource: DataSource;
   actionFilter: string;
   actionOptions: string[];
   onActionFilterChange: (value: string) => void;
+  onExport: (format: AuditExportFormat) => void;
 }) {
+  const exportDisabled = dataSource !== "api" || mode !== "ready";
   return (
     <section className="audit-panel" id="audit" aria-labelledby="audit-history-title">
       <div className="section-head">
@@ -948,13 +979,23 @@ function AuditHistory({
           <h2 id="audit-history-title">Audit history</h2>
           <p>Latest governance events from analysis, policy, API key, and bootstrap flows.</p>
         </div>
-        <select value={actionFilter} onChange={(event) => onActionFilterChange(event.target.value)} aria-label="Filter audit events by action">
-          {actionOptions.map((action) => (
-            <option key={action} value={action}>
-              {action === "all" ? "All actions" : action}
-            </option>
-          ))}
-        </select>
+        <div className="audit-toolbar">
+          <select value={actionFilter} onChange={(event) => onActionFilterChange(event.target.value)} aria-label="Filter audit events by action">
+            {actionOptions.map((action) => (
+              <option key={action} value={action}>
+                {action === "all" ? "All actions" : action}
+              </option>
+            ))}
+          </select>
+          <button type="button" disabled={exportDisabled} onClick={() => onExport("json")}>
+            <Download size={16} />
+            JSON
+          </button>
+          <button type="button" disabled={exportDisabled} onClick={() => onExport("csv")}>
+            <Download size={16} />
+            CSV
+          </button>
+        </div>
       </div>
       <div className="table-wrap audit-table-wrap">
         <table className="audit-table">
@@ -1072,6 +1113,25 @@ async function fetchWithTimeout(url: string, apiKey: string, init: RequestInit =
 
 function isAuthError(error: unknown) {
   return error instanceof Error && error.message.includes("401");
+}
+
+function buildAuditExportUrl(actionFilter: string, format: AuditExportFormat) {
+  const params = new URLSearchParams({
+    format,
+    limit: "500",
+  });
+  if (actionFilter !== "all") {
+    params.set("action", actionFilter);
+  }
+  return `${API_BASE_URL}/api/audit-events/export?${params.toString()}`;
+}
+
+function buildAuditExportFilename(actionFilter: string, format: AuditExportFormat) {
+  return `agentreview-audit-${fileSafeSegment(actionFilter)}.${format}`;
+}
+
+function fileSafeSegment(value: string) {
+  return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "all";
 }
 
 function normalizeSummary(summary: ApiSummary): Analysis {

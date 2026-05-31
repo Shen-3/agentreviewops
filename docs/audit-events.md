@@ -14,6 +14,7 @@ Protected endpoint:
 
 ```text
 GET /api/audit-events
+GET /api/audit-events/export
 ```
 
 Supported query parameters:
@@ -36,3 +37,15 @@ Example:
 curl -H "Authorization: Bearer $AGENTREVIEW_API_KEY" \
   "http://127.0.0.1:8000/api/audit-events?action=analysis.created&limit=20"
 ```
+
+## Export
+
+`GET /api/audit-events/export` accepts the same filters and returns attachment-ready JSON or CSV:
+
+```bash
+curl -H "Authorization: Bearer $AGENTREVIEW_API_KEY" \
+  "http://127.0.0.1:8000/api/audit-events/export?format=csv&action=policy.created" \
+  -o agentreview-audit-events.csv
+```
+
+CSV exports use stable columns and store sanitized metadata as compact JSON in the `metadata` column.
