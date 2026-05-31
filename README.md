@@ -10,7 +10,7 @@ Use it when your team uses Cursor, Copilot, Devin, Codex, Claude Code, or other 
 
 This repository is at the CLI/API/dashboard foundation stage. It provides a Typer-based `agentreview` command that can scan a unified diff or GitHub pull request, apply deterministic risk rules, persist analysis runs and audit events through FastAPI, and manage the self-hosted review control plane from a React dashboard.
 
-GitHub Action usage is documented for artifact-based reports. Multi-tenant auth foundations and an offline AI provider interface exist; hosted deployment and real LLM providers are intentionally not implemented yet.
+GitHub Action usage is documented for artifact-based reports and optional self-hosted dashboard submission. Multi-tenant auth foundations and an offline AI provider interface exist; hosted deployment and real LLM providers are intentionally not implemented yet.
 
 ## Quick Start
 
@@ -27,10 +27,13 @@ python -m venv .venv
 ```bash
 agentreview --help
 agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md
+AGENTREVIEW_API_KEY=<api-key> agentreview submit-diff --diff-file examples/sample.diff --api-url http://127.0.0.1:8000 --repository owner/name --pr 123
 GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --output agentreview-report.md
 ```
 
 Expected scan output includes the risk level, positive findings, and the report path.
+
+`submit-diff` sends a unified diff to a self-hosted AgentReviewOps API and persists the result for the dashboard. The API key is read from `AGENTREVIEW_API_KEY` or `--api-key` and is not printed in command output.
 
 `scan-pr` fetches the pull request diff from the GitHub API using `GITHUB_TOKEN`. The token is required at runtime and is not printed in command output.
 

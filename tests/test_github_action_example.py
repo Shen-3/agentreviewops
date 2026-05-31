@@ -20,11 +20,15 @@ def test_composite_action_yaml_is_valid() -> None:
     assert action["name"] == "AgentReviewOps scan-diff"
     assert action["runs"]["using"] == "composite"
     assert "diff-file" in action["inputs"]
+    assert "api-url" in action["inputs"]
+    assert "api-key" in action["inputs"]
+    assert "agentreview submit-diff" in str(action["runs"]["steps"])
 
 
 def test_github_action_docs_explain_artifact_flow() -> None:
     docs = (PROJECT_ROOT / "docs" / "github-action.md").read_text(encoding="utf-8")
 
     assert "agentreview scan-diff" in docs
+    assert "agentreview submit-diff" in docs
     assert "actions/upload-artifact@v4" in docs
     assert "does not yet post PR comments" in docs

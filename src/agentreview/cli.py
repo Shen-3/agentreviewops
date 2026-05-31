@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 
+import httpx
 import typer
 
 from agentreview import __version__
@@ -164,6 +165,108 @@ def scan_diff(
     typer.echo(f"Report written to: {output}")
 
 
+@app.command("submit-diff")
+def submit_diff(
+    diff_file: Path = typer.Option(
+        ...,
+        "--diff-file",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Unified diff file to submit to a self-hosted AgentReviewOps API.",
+    ),
+    config_path: Path = typer.Option(
+        Path(DEFAULT_CONFIG_PATH),
+        "--config",
+        help="Path to .agentreview.yml. Missing files use built-in defaults unless an organization policy overrides them.",
+    ),
+    api_url: str = typer.Option(
+        "http://127.0.0.1:8000",
+        "--api-url",
+        envvar="AGENTREVIEW_API_URL",
+        help="Base URL for the AgentReviewOps API.",
+    ),
+    api_key: str | None = typer.Option(
+        None,
+        "--api-key",
+        envvar="AGENTREVIEW_API_KEY",
+        help="AgentReviewOps API key. Prefer AGENTREVIEW_API_KEY in CI.",
+    ),
+    repository: str | None = typer.Option(None, "--repository", help="Repository identifier such as owner/name."),
+    pull_request_number: int | None = typer.Option(None, "--pr", min=1, help="Pull request number, when available."),
+    title: str | None = typer.Option(None, "--title", help="Pull request or analysis title."),
+    author: str | None = typer.Option(None, "--author", help="Pull request author or agent account."),
+    agent_name: str | None = typer.Option(None, "--agent-name", help="Detected or supplied AI agent name."),
+    branch: str | None = typer.Option(None, "--branch", help="Source branch name."),
+    timeout_seconds: float = typer.Option(15.0, "--timeout", min=1.0, max=120.0, help="API request timeout in seconds."),
+) -> None:
+    """Submit a unified diff to the self-hosted API and persist the analysis run."""
+    if not api_key:
+        typer.echo("API key required. Set AGENTREVIEW_API_KEY or pass --api-key.", err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        config = load_config(config_path)
+        diff_text = diff_file.read_text(encoding="utf-8")
+    except ConfigError as exc:
+        typer.echo(f"Config error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except OSError as exc:
+        typer.echo(f"Could not read diff file {diff_file}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    payload = {
+        "diff": diff_text,
+        "config": config.model_dump(mode="json"),
+        "repository": repository,
+        "pull_request_number": pull_request_number,
+        "title": title,
+        "author": author,
+        "agent_name": agent_name,
+        "branch": branch,
+    }
+    try:
+        response = httpx.post(
+            f"{api_url.rstrip('/')}/api/analyze/diff",
+            json={key: value for key, value in payload.items() if value is not None},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": f"agentreview/{__version__}",
+            },
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except httpx.HTTPStatusError as exc:
+        typer.echo(f"API error: {_response_error_detail(exc.response)}", err=True)
+        raise typer.Exit(code=1) from exc
+    except httpx.HTTPError as exc:
+        typer.echo(f"API request failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        typer.echo("API response was not valid JSON.", err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        analysis_run_id = body["analysis_run_id"]
+        risk_level = str(body["risk_level"]).upper()
+        risk_score = body["risk_score"]
+        finding_count = len(body.get("findings", []))
+        changed_file_count = len(body.get("changed_files", []))
+    except KeyError as exc:
+        typer.echo(f"API response missing expected field: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo("AgentReviewOps")
+    typer.echo(f"Submitted analysis run: {analysis_run_id}")
+    typer.echo(f"Risk: {risk_level} {risk_score}/100")
+    typer.echo(f"Changed files: {changed_file_count}")
+    typer.echo(f"Findings: {finding_count}")
+    typer.echo(f"Report API: {api_url.rstrip('/')}/api/analysis-runs/{analysis_run_id}/report")
+
+
 @app.command("scan-pr")
 def scan_pr(
     repo: str = typer.Option(
@@ -217,6 +320,15 @@ def scan_pr(
     typer.echo(f"GitHub PR: {repo}#{pr_number}")
     typer.echo(f"Risk: {analysis.risk_level.upper()} {analysis.risk_score}/100")
     typer.echo(f"Report written to: {output}")
+
+
+def _response_error_detail(response: httpx.Response) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        return f"{response.status_code} {response.reason_phrase}"
+    detail = body.get("detail") if isinstance(body, dict) else None
+    return f"{response.status_code} {detail or response.reason_phrase}"
 
 
 if __name__ == "__main__":

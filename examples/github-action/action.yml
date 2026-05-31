@@ -1,5 +1,5 @@
 name: AgentReviewOps scan-diff
-description: Analyze a prepared unified diff and generate an AgentReviewOps Markdown report.
+description: Analyze a prepared unified diff, generate a Markdown report, and optionally submit it to a self-hosted AgentReviewOps API.
 
 inputs:
   diff-file:
@@ -14,6 +14,38 @@ inputs:
     description: Path where the Markdown report should be written.
     required: false
     default: agentreview-report.md
+  api-url:
+    description: Optional AgentReviewOps API base URL for dashboard submission.
+    required: false
+    default: ""
+  api-key:
+    description: Optional AgentReviewOps API key for dashboard submission. Prefer a GitHub secret.
+    required: false
+    default: ""
+  repository:
+    description: Optional repository identifier such as owner/name.
+    required: false
+    default: ""
+  pr-number:
+    description: Optional pull request number.
+    required: false
+    default: ""
+  title:
+    description: Optional pull request title.
+    required: false
+    default: ""
+  author:
+    description: Optional pull request author or agent account.
+    required: false
+    default: ""
+  agent-name:
+    description: Optional detected or supplied AI agent name.
+    required: false
+    default: ""
+  branch:
+    description: Optional source branch name.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -25,3 +57,31 @@ runs:
     - name: Run AgentReviewOps scan
       shell: bash
       run: agentreview scan-diff --diff-file "${{ inputs.diff-file }}" --config "${{ inputs.config }}" --output "${{ inputs.output }}"
+
+    - name: Submit AgentReviewOps analysis
+      if: ${{ inputs.api-url != '' && inputs.api-key != '' }}
+      shell: bash
+      env:
+        AGENTREVIEW_API_KEY: ${{ inputs.api-key }}
+        AGENTREVIEW_INPUT_DIFF_FILE: ${{ inputs.diff-file }}
+        AGENTREVIEW_INPUT_CONFIG: ${{ inputs.config }}
+        AGENTREVIEW_INPUT_API_URL: ${{ inputs.api-url }}
+        AGENTREVIEW_INPUT_REPOSITORY: ${{ inputs.repository }}
+        AGENTREVIEW_INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        AGENTREVIEW_INPUT_TITLE: ${{ inputs.title }}
+        AGENTREVIEW_INPUT_AUTHOR: ${{ inputs.author }}
+        AGENTREVIEW_INPUT_AGENT_NAME: ${{ inputs.agent-name }}
+        AGENTREVIEW_INPUT_BRANCH: ${{ inputs.branch }}
+      run: |
+        args=(
+          --diff-file "$AGENTREVIEW_INPUT_DIFF_FILE"
+          --config "$AGENTREVIEW_INPUT_CONFIG"
+          --api-url "$AGENTREVIEW_INPUT_API_URL"
+        )
+        if [ -n "$AGENTREVIEW_INPUT_REPOSITORY" ]; then args+=(--repository "$AGENTREVIEW_INPUT_REPOSITORY"); fi
+        if [ -n "$AGENTREVIEW_INPUT_PR_NUMBER" ]; then args+=(--pr "$AGENTREVIEW_INPUT_PR_NUMBER"); fi
+        if [ -n "$AGENTREVIEW_INPUT_TITLE" ]; then args+=(--title "$AGENTREVIEW_INPUT_TITLE"); fi
+        if [ -n "$AGENTREVIEW_INPUT_AUTHOR" ]; then args+=(--author "$AGENTREVIEW_INPUT_AUTHOR"); fi
+        if [ -n "$AGENTREVIEW_INPUT_AGENT_NAME" ]; then args+=(--agent-name "$AGENTREVIEW_INPUT_AGENT_NAME"); fi
+        if [ -n "$AGENTREVIEW_INPUT_BRANCH" ]; then args+=(--branch "$AGENTREVIEW_INPUT_BRANCH"); fi
+        agentreview submit-diff "${args[@]}"
