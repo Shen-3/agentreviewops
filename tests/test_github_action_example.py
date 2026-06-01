@@ -39,5 +39,7 @@ def test_github_action_docs_explain_artifact_flow() -> None:
     assert "agentreview comment-pr" in docs
     assert "Shen-3/agentreviewops/examples/github-action@main" in docs
     assert "$GITHUB_ACTION_PATH" in docs
+    assert "actions/checkout@v6" in docs
+    assert "actions/setup-python@v6" in docs
     assert "actions/upload-artifact@v4" in docs
     assert "pull-requests: write" in docs

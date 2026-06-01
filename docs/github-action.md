@@ -26,12 +26,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -82,12 +82,12 @@ In a consuming repository, set up Python first, check out the repository you wan
 
 ```yaml
 - name: Set up Python
-  uses: actions/setup-python@v5
+  uses: actions/setup-python@v6
   with:
     python-version: "3.12"
 
 - name: Check out repository
-  uses: actions/checkout@v4
+  uses: actions/checkout@v6
   with:
     fetch-depth: 0
 

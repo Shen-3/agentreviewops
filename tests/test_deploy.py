@@ -60,10 +60,13 @@ def test_ci_runs_python_tests_and_web_build() -> None:
     assert "web-build" in jobs
 
     python_steps = jobs["python-test"]["steps"]
+    assert any(step.get("uses") == "actions/checkout@v6" for step in python_steps)
+    assert any(step.get("uses") == "actions/setup-python@v6" for step in python_steps)
     assert any(step.get("run") == 'python -m pip install -e ".[dev]"' for step in python_steps)
     assert any(step.get("run") == "pytest" for step in python_steps)
 
     web_steps = jobs["web-build"]["steps"]
-    assert any(step.get("uses") == "actions/setup-node@v4" for step in web_steps)
+    assert any(step.get("uses") == "actions/checkout@v6" for step in web_steps)
+    assert any(step.get("uses") == "actions/setup-node@v6" for step in web_steps)
     assert any(step.get("working-directory") == "apps/web" and step.get("run") == "npm ci" for step in web_steps)
     assert any(step.get("working-directory") == "apps/web" and step.get("run") == "npm run build" for step in web_steps)
