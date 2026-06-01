@@ -167,7 +167,7 @@ npm run dev
 
 Then open `http://127.0.0.1:5173`.
 
-The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes diff submission, analysis list, selected analysis detail, risk badges, findings table, report preview, user management, repository onboarding with reviewer routing assignment, organization and repository policy assignment, role-scoped API key management, audit history with JSON/CSV export, and loading/error/empty states.
+The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. With a live key, it reads `/api/auth/me` and enables only the actions allowed by that key role: admin keys manage governance and submit analyses, CI keys submit analyses, and read-only keys inspect existing data and export audit evidence. It includes diff submission, analysis list, selected analysis detail, risk badges, findings table, report preview, user management, repository onboarding with reviewer routing assignment, organization and repository policy assignment, role-scoped API key management, audit history with JSON/CSV export, and loading/error/empty states.
 
 ## Sample Config
 

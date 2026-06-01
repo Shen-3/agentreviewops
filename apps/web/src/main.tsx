@@ -100,6 +100,22 @@ type CreatedApiKey = {
 
 type ApiKeyRole = "admin" | "ci" | "read_only";
 
+type DashboardAuth = {
+  organizationId: string;
+  apiKeyId: string;
+  apiKeyName: string;
+  apiKeyRole: ApiKeyRole;
+};
+
+type DashboardAccess = {
+  role: ApiKeyRole | null;
+  roleLabel: string;
+  canSubmitAnalysis: boolean;
+  canManageGovernance: boolean;
+  analysisHint: string | null;
+  governanceHint: string | null;
+};
+
 type RulesConfigPayload = Record<RuleId, boolean>;
 
 type PolicyConfigPayload = {
@@ -229,6 +245,13 @@ type ApiKeyPayload = {
   created_at: string;
   revoked_at: string | null;
   is_current: boolean;
+};
+
+type ApiAuthPayload = {
+  organization_id: string;
+  api_key_id: string;
+  api_key_name: string;
+  api_key_role: ApiKeyRole;
 };
 
 type ApiUserPayload = {
@@ -583,6 +606,7 @@ function Dashboard() {
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [mode, setMode] = React.useState<LoadMode>("loading");
   const [dataSource, setDataSource] = React.useState<DataSource>("api");
+  const [authContext, setAuthContext] = React.useState<DashboardAuth | null>(null);
   const [riskFilter, setRiskFilter] = React.useState<RiskLevel | "all">("all");
   const [auditActionFilter, setAuditActionFilter] = React.useState("all");
   const [query, setQuery] = React.useState("");
@@ -604,6 +628,7 @@ function Dashboard() {
   const loadWorkspaceData = React.useCallback(async () => {
     setMode("loading");
     if (!apiKey) {
+      setAuthContext(null);
       setAnalyses(seededAnalyses);
       setAuditEvents(seededAuditEvents);
       setApiKeys(seededApiKeys);
@@ -618,7 +643,8 @@ function Dashboard() {
       return;
     }
     try {
-      const [analysisResponse, auditResponse, apiKeysResponse, usersResponse, repositoriesResponse, policiesResponse] = await Promise.all([
+      const [authResponse, analysisResponse, auditResponse, apiKeysResponse, usersResponse, repositoriesResponse, policiesResponse] = await Promise.all([
+        fetchWithTimeout(`${API_BASE_URL}/api/auth/me`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/analysis-runs`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/audit-events?limit=50`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/api-keys`, apiKey),
@@ -626,6 +652,7 @@ function Dashboard() {
         fetchWithTimeout(`${API_BASE_URL}/api/repositories`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/policies`, apiKey),
       ]);
+      const authPayload = (await authResponse.json()) as ApiAuthPayload;
       const summaries = (await analysisResponse.json()) as ApiSummary[];
       const auditPayload = (await auditResponse.json()) as ApiAuditEvent[];
       const apiKeyPayload = (await apiKeysResponse.json()) as ApiKeyPayload[];
@@ -638,6 +665,7 @@ function Dashboard() {
       const normalizedUsers = userPayload.map(normalizeUser);
       const normalizedRepositories = repositoryPayload.map(normalizeRepository);
       const normalizedPolicies = policyPayload.map(normalizePolicy);
+      setAuthContext(normalizeAuth(authPayload));
       setAnalyses(normalized);
       setAuditEvents(normalizedAudit);
       setApiKeys(normalizedApiKeys);
@@ -656,6 +684,7 @@ function Dashboard() {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
       }
+      setAuthContext(null);
       setAnalyses([]);
       setAuditEvents([]);
       setApiKeys([]);
@@ -696,6 +725,7 @@ function Dashboard() {
     return auditEvents.filter((event) => auditActionFilter === "all" || event.action === auditActionFilter);
   }, [auditActionFilter, auditEvents, mode]);
   const activeApiKeyCount = apiKeys.filter((record) => record.revokedAt === null).length;
+  const access = getDashboardAccess(dataSource, mode, authContext);
 
   const banner = getBanner(mode, dataSource);
   const saveApiKey = (event: React.FormEvent<HTMLFormElement>) => {
@@ -711,6 +741,7 @@ function Dashboard() {
   const signOut = () => {
     window.localStorage.removeItem(API_KEY_STORAGE_KEY);
     setApiKey("");
+    setAuthContext(null);
     setAnalyses(seededAnalyses);
     setAuditEvents(seededAuditEvents);
     setApiKeys(seededApiKeys);
@@ -729,6 +760,10 @@ function Dashboard() {
   };
   const createDashboardApiKey = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!access.canManageGovernance) {
+      setCreatedApiKey(null);
+      return;
+    }
     const normalizedName = newApiKeyName.trim();
     if (!apiKey || !normalizedName) {
       return;
@@ -752,12 +787,17 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
       }
       setMode("error");
     }
   };
   const createDashboardRepository = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!access.canManageGovernance) {
+      setRepositoryStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -788,6 +828,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
         setMode("error");
         return;
       }
@@ -799,6 +840,10 @@ function Dashboard() {
   };
   const createDashboardUser = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!access.canManageGovernance) {
+      setUserStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -827,6 +872,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
         setMode("error");
         return;
       }
@@ -838,6 +884,10 @@ function Dashboard() {
   };
   const assignDashboardMembership = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!access.canManageGovernance) {
+      setMembershipStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -865,6 +915,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
         setMode("error");
         return;
       }
@@ -875,6 +926,10 @@ function Dashboard() {
     }
   };
   const removeDashboardMembership = async (repositoryId: string, userId: string) => {
+    if (!access.canManageGovernance) {
+      setMembershipStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -890,6 +945,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
         setMode("error");
         return;
       }
@@ -898,6 +954,10 @@ function Dashboard() {
     }
   };
   const updateDashboardMembershipRole = async (repositoryId: string, userId: string, role: "owner" | "maintainer" | "reviewer") => {
+    if (!access.canManageGovernance) {
+      setMembershipStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -917,6 +977,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
         setMode("error");
         return;
       }
@@ -925,6 +986,10 @@ function Dashboard() {
     }
   };
   const deleteDashboardUser = async (userId: string) => {
+    if (!access.canManageGovernance) {
+      setUserStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -939,6 +1004,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
         setMode("error");
         return;
       }
@@ -949,6 +1015,10 @@ function Dashboard() {
     }
   };
   const updateDashboardUserRole = async (userId: string, role: "admin" | "reviewer") => {
+    if (!access.canManageGovernance) {
+      setUserStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -968,6 +1038,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
         setMode("error");
         return;
       }
@@ -978,6 +1049,9 @@ function Dashboard() {
     }
   };
   const updateDashboardApiKeyRole = async (apiKeyId: string, role: ApiKeyRole) => {
+    if (!access.canManageGovernance) {
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -996,6 +1070,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
         setMode("error");
         return;
       }
@@ -1003,6 +1078,9 @@ function Dashboard() {
     }
   };
   const revokeDashboardApiKey = async (apiKeyId: string) => {
+    if (!access.canManageGovernance) {
+      return;
+    }
     if (!apiKey) {
       return;
     }
@@ -1017,12 +1095,17 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
       }
       setMode("error");
     }
   };
   const saveDashboardPolicy = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!access.canManageGovernance) {
+      setPolicyStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -1066,6 +1149,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
       }
       setPolicyStatus("Policy could not be saved.");
       setMode("error");
@@ -1090,12 +1174,17 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
       }
       setMode("error");
     }
   };
   const submitDashboardDiff = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!access.canSubmitAnalysis) {
+      setDiffSubmitStatus(access.analysisHint ?? "Admin or CI API key required.");
+      return;
+    }
     if (!apiKey || dataSource !== "api") {
       return;
     }
@@ -1145,6 +1234,7 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
+        setAuthContext(null);
       }
       setDiffSubmitStatus("Analysis could not be created.");
       setMode("error");
@@ -1190,8 +1280,9 @@ function Dashboard() {
       <main className="workspace">
         <header className="topbar">
           <div className="topbar-heading">
-            <p className="eyebrow">Read-only dashboard</p>
+            <p className="eyebrow">Review dashboard</p>
             <h1>AI pull request review queue</h1>
+            <span className="access-badge">{access.roleLabel}</span>
           </div>
           <div className="topbar-actions">
             <form className="api-key-form" onSubmit={saveApiKey}>
@@ -1240,6 +1331,8 @@ function Dashboard() {
           dataSource={dataSource}
           status={diffSubmitStatus}
           isSubmitting={isSubmittingDiff}
+          canSubmitAnalysis={access.canSubmitAnalysis}
+          accessHint={access.analysisHint}
           onFormChange={setDiffForm}
           onSubmit={submitDashboardDiff}
         />
@@ -1293,6 +1386,8 @@ function Dashboard() {
           status={repositoryStatus}
           membershipForm={membershipForm}
           membershipStatus={membershipStatus}
+          canManageGovernance={access.canManageGovernance}
+          accessHint={access.governanceHint}
           onFormChange={setRepositoryForm}
           onCreate={createDashboardRepository}
           onMembershipFormChange={setMembershipForm}
@@ -1307,6 +1402,8 @@ function Dashboard() {
           dataSource={dataSource}
           form={userForm}
           status={userStatus}
+          canManageGovernance={access.canManageGovernance}
+          accessHint={access.governanceHint}
           onFormChange={setUserForm}
           onCreate={createDashboardUser}
           onUpdateRole={(userId, role) => void updateDashboardUserRole(userId, role)}
@@ -1320,6 +1417,8 @@ function Dashboard() {
           mode={mode}
           dataSource={dataSource}
           status={policyStatus}
+          canManageGovernance={access.canManageGovernance}
+          accessHint={access.governanceHint}
           onFormChange={setPolicyForm}
           onSave={saveDashboardPolicy}
         />
@@ -1331,6 +1430,8 @@ function Dashboard() {
           newApiKeyName={newApiKeyName}
           newApiKeyRole={newApiKeyRole}
           createdApiKey={createdApiKey}
+          canManageGovernance={access.canManageGovernance}
+          accessHint={access.governanceHint}
           onNameChange={setNewApiKeyName}
           onRoleChange={setNewApiKeyRole}
           onCreate={createDashboardApiKey}
@@ -1368,6 +1469,8 @@ function DiffSubmitPanel({
   dataSource,
   status,
   isSubmitting,
+  canSubmitAnalysis,
+  accessHint,
   onFormChange,
   onSubmit,
 }: {
@@ -1376,10 +1479,13 @@ function DiffSubmitPanel({
   dataSource: DataSource;
   status: string;
   isSubmitting: boolean;
+  canSubmitAnalysis: boolean;
+  accessHint: string | null;
   onFormChange: React.Dispatch<React.SetStateAction<DiffSubmitFormState>>;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
+  const canEdit = liveData && canSubmitAnalysis;
   return (
     <section className="diff-submit-panel" id="submit-diff" aria-labelledby="diff-submit-title">
       <div className="section-head">
@@ -1387,7 +1493,7 @@ function DiffSubmitPanel({
           <p className="eyebrow">Analyze</p>
           <h2 id="diff-submit-title">Submit diff</h2>
         </div>
-        {status ? <span className="policy-status">{status}</span> : null}
+        {status || accessHint ? <span className="policy-status">{status || accessHint}</span> : null}
       </div>
       <form className="diff-submit-form" onSubmit={onSubmit}>
         <div className="diff-submit-grid">
@@ -1396,7 +1502,7 @@ function DiffSubmitPanel({
             <input
               value={form.repository}
               onChange={(event) => onFormChange((current) => ({ ...current, repository: event.target.value }))}
-              disabled={!liveData || isSubmitting}
+              disabled={!canEdit || isSubmitting}
               placeholder="owner/name"
             />
           </label>
@@ -1405,7 +1511,7 @@ function DiffSubmitPanel({
             <input
               value={form.pullRequestNumber}
               onChange={(event) => onFormChange((current) => ({ ...current, pullRequestNumber: event.target.value }))}
-              disabled={!liveData || isSubmitting}
+              disabled={!canEdit || isSubmitting}
               inputMode="numeric"
             />
           </label>
@@ -1414,7 +1520,7 @@ function DiffSubmitPanel({
             <input
               value={form.title}
               onChange={(event) => onFormChange((current) => ({ ...current, title: event.target.value }))}
-              disabled={!liveData || isSubmitting}
+              disabled={!canEdit || isSubmitting}
             />
           </label>
           <label>
@@ -1422,7 +1528,7 @@ function DiffSubmitPanel({
             <input
               value={form.branch}
               onChange={(event) => onFormChange((current) => ({ ...current, branch: event.target.value }))}
-              disabled={!liveData || isSubmitting}
+              disabled={!canEdit || isSubmitting}
             />
           </label>
           <label>
@@ -1430,7 +1536,7 @@ function DiffSubmitPanel({
             <input
               value={form.author}
               onChange={(event) => onFormChange((current) => ({ ...current, author: event.target.value }))}
-              disabled={!liveData || isSubmitting}
+              disabled={!canEdit || isSubmitting}
             />
           </label>
           <label>
@@ -1438,7 +1544,7 @@ function DiffSubmitPanel({
             <input
               value={form.agentName}
               onChange={(event) => onFormChange((current) => ({ ...current, agentName: event.target.value }))}
-              disabled={!liveData || isSubmitting}
+              disabled={!canEdit || isSubmitting}
             />
           </label>
         </div>
@@ -1447,13 +1553,13 @@ function DiffSubmitPanel({
           <textarea
             value={form.diff}
             onChange={(event) => onFormChange((current) => ({ ...current, diff: event.target.value }))}
-            disabled={!liveData || isSubmitting}
+            disabled={!canEdit || isSubmitting}
             rows={9}
             placeholder="diff --git a/file b/file"
           />
         </label>
         <div className="policy-actions">
-          <button className="primary" type="submit" disabled={!liveData || isSubmitting}>
+          <button className="primary" type="submit" disabled={!canEdit || isSubmitting}>
             <ShieldCheck size={16} />
             {isSubmitting ? "Analyzing" : "Analyze diff"}
           </button>
@@ -1627,6 +1733,8 @@ function RepositoryAdmin({
   status,
   membershipForm,
   membershipStatus,
+  canManageGovernance,
+  accessHint,
   onFormChange,
   onCreate,
   onMembershipFormChange,
@@ -1642,6 +1750,8 @@ function RepositoryAdmin({
   status: string;
   membershipForm: MembershipFormState;
   membershipStatus: string;
+  canManageGovernance: boolean;
+  accessHint: string | null;
   onFormChange: React.Dispatch<React.SetStateAction<RepositoryFormState>>;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onMembershipFormChange: React.Dispatch<React.SetStateAction<MembershipFormState>>;
@@ -1650,6 +1760,7 @@ function RepositoryAdmin({
   onUpdateMembershipRole: (repositoryId: string, userId: string, role: "owner" | "maintainer" | "reviewer") => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
+  const canEdit = liveData && canManageGovernance;
   return (
     <section className="repository-panel" id="repositories" aria-labelledby="repository-admin-title">
       <div className="section-head">
@@ -1664,7 +1775,7 @@ function RepositoryAdmin({
             <input
               value={form.provider}
               onChange={(event) => onFormChange((current) => ({ ...current, provider: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
             />
           </label>
           <label>
@@ -1672,7 +1783,7 @@ function RepositoryAdmin({
             <input
               value={form.owner}
               onChange={(event) => onFormChange((current) => ({ ...current, owner: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               placeholder="platform"
             />
           </label>
@@ -1681,7 +1792,7 @@ function RepositoryAdmin({
             <input
               value={form.name}
               onChange={(event) => onFormChange((current) => ({ ...current, name: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               placeholder="checkout-api"
             />
           </label>
@@ -1690,31 +1801,31 @@ function RepositoryAdmin({
             <input
               value={form.defaultBranch}
               onChange={(event) => onFormChange((current) => ({ ...current, defaultBranch: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
             />
           </label>
           <label>
             <span>Visibility</span>
-            <select value={form.visibility} onChange={(event) => onFormChange((current) => ({ ...current, visibility: event.target.value }))} disabled={!liveData}>
+            <select value={form.visibility} onChange={(event) => onFormChange((current) => ({ ...current, visibility: event.target.value }))} disabled={!canEdit}>
               <option value="private">Private</option>
               <option value="public">Public</option>
               <option value="">Unspecified</option>
             </select>
           </label>
-          <button className="primary" type="submit" disabled={!liveData || !form.owner.trim() || !form.name.trim()}>
+          <button className="primary" type="submit" disabled={!canEdit || !form.owner.trim() || !form.name.trim()}>
             <ShieldCheck size={16} />
             Add
           </button>
         </form>
       </div>
-      {status ? <span className="policy-status">{status}</span> : null}
+      {status || accessHint ? <span className="policy-status">{status || accessHint}</span> : null}
       <form className="repository-routing-form" onSubmit={onAssignMembership}>
         <label>
           <span>Route repository</span>
           <select
             value={membershipForm.repositoryId}
             onChange={(event) => onMembershipFormChange((current) => ({ ...current, repositoryId: event.target.value }))}
-            disabled={!liveData || !repositories.length}
+            disabled={!canEdit || !repositories.length}
           >
             <option value="">Choose repository</option>
             {repositories.map((repository) => (
@@ -1729,7 +1840,7 @@ function RepositoryAdmin({
           <select
             value={membershipForm.userId}
             onChange={(event) => onMembershipFormChange((current) => ({ ...current, userId: event.target.value }))}
-            disabled={!liveData || !users.length}
+            disabled={!canEdit || !users.length}
           >
             <option value="">Choose user</option>
             {users.map((user) => (
@@ -1744,14 +1855,14 @@ function RepositoryAdmin({
           <select
             value={membershipForm.role}
             onChange={(event) => onMembershipFormChange((current) => ({ ...current, role: event.target.value as "owner" | "maintainer" | "reviewer" }))}
-            disabled={!liveData}
+            disabled={!canEdit}
           >
             <option value="owner">Owner</option>
             <option value="maintainer">Maintainer</option>
             <option value="reviewer">Reviewer</option>
           </select>
         </label>
-        <button className="primary" type="submit" disabled={!liveData || !membershipForm.repositoryId || !membershipForm.userId}>
+        <button className="primary" type="submit" disabled={!canEdit || !membershipForm.repositoryId || !membershipForm.userId}>
           <ShieldCheck size={16} />
           Assign
         </button>
@@ -1770,7 +1881,7 @@ function RepositoryAdmin({
             </tr>
           </thead>
           <tbody>
-            <RepositoryRows repositories={repositories} mode={mode} liveData={liveData} onRemoveMembership={onRemoveMembership} onUpdateMembershipRole={onUpdateMembershipRole} />
+            <RepositoryRows repositories={repositories} mode={mode} liveData={canEdit} onRemoveMembership={onRemoveMembership} onUpdateMembershipRole={onUpdateMembershipRole} />
           </tbody>
         </table>
       </div>
@@ -1870,6 +1981,8 @@ function UserAdmin({
   dataSource,
   form,
   status,
+  canManageGovernance,
+  accessHint,
   onFormChange,
   onCreate,
   onUpdateRole,
@@ -1880,12 +1993,15 @@ function UserAdmin({
   dataSource: DataSource;
   form: UserFormState;
   status: string;
+  canManageGovernance: boolean;
+  accessHint: string | null;
   onFormChange: React.Dispatch<React.SetStateAction<UserFormState>>;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onUpdateRole: (userId: string, role: "admin" | "reviewer") => void;
   onDelete: (userId: string) => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
+  const canEdit = liveData && canManageGovernance;
   return (
     <section className="user-panel" id="users" aria-labelledby="user-admin-title">
       <div className="section-head">
@@ -1900,7 +2016,7 @@ function UserAdmin({
             <input
               value={form.email}
               onChange={(event) => onFormChange((current) => ({ ...current, email: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               placeholder="reviewer@example.com"
             />
           </label>
@@ -1909,24 +2025,24 @@ function UserAdmin({
             <input
               value={form.name}
               onChange={(event) => onFormChange((current) => ({ ...current, name: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               placeholder="Reviewer"
             />
           </label>
           <label>
             <span>Org role</span>
-            <select value={form.role} onChange={(event) => onFormChange((current) => ({ ...current, role: event.target.value as "admin" | "reviewer" }))} disabled={!liveData}>
+            <select value={form.role} onChange={(event) => onFormChange((current) => ({ ...current, role: event.target.value as "admin" | "reviewer" }))} disabled={!canEdit}>
               <option value="admin">Admin</option>
               <option value="reviewer">Reviewer</option>
             </select>
           </label>
-          <button className="primary" type="submit" disabled={!liveData || !form.email.trim()}>
+          <button className="primary" type="submit" disabled={!canEdit || !form.email.trim()}>
             <ShieldCheck size={16} />
             Add user
           </button>
         </form>
       </div>
-      {status ? <span className="policy-status">{status}</span> : null}
+      {status || accessHint ? <span className="policy-status">{status || accessHint}</span> : null}
       <div className="table-wrap user-table-wrap">
         <table className="user-table">
           <thead>
@@ -1938,7 +2054,7 @@ function UserAdmin({
             </tr>
           </thead>
           <tbody>
-            <UserRows users={users} mode={mode} liveData={liveData} onUpdateRole={onUpdateRole} onDelete={onDelete} />
+            <UserRows users={users} mode={mode} liveData={canEdit} onUpdateRole={onUpdateRole} onDelete={onDelete} />
           </tbody>
         </table>
       </div>
@@ -2010,6 +2126,8 @@ function PolicyEditor({
   mode,
   dataSource,
   status,
+  canManageGovernance,
+  accessHint,
   onFormChange,
   onSave,
 }: {
@@ -2019,10 +2137,13 @@ function PolicyEditor({
   mode: LoadMode;
   dataSource: DataSource;
   status: string;
+  canManageGovernance: boolean;
+  accessHint: string | null;
   onFormChange: React.Dispatch<React.SetStateAction<PolicyFormState>>;
   onSave: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
+  const canEdit = liveData && canManageGovernance;
   const activePolicy = policies.find((policy) => policy.enabled) ?? policies[0] ?? null;
   const repositoryOptions = repositories.map((repository) => ({ id: repository.id, label: repository.fullName }));
   const updateRule = (rule: RuleId, enabled: boolean) => {
@@ -2060,7 +2181,7 @@ function PolicyEditor({
             <input
               value={form.name}
               onChange={(event) => onFormChange((current) => ({ ...current, name: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               placeholder="Default review policy"
             />
           </label>
@@ -2075,7 +2196,7 @@ function PolicyEditor({
                   repositoryId: event.target.value === "repository" ? current.repositoryId || repositoryOptions[0]?.id || "" : "",
                 }))
               }
-              disabled={!liveData}
+              disabled={!canEdit}
             >
               <option value="organization">Organization</option>
               <option value="repository">Repository</option>
@@ -2086,7 +2207,7 @@ function PolicyEditor({
             <select
               value={form.repositoryId}
               onChange={(event) => onFormChange((current) => ({ ...current, repositoryId: event.target.value }))}
-              disabled={!liveData || form.scope !== "repository" || !repositoryOptions.length}
+              disabled={!canEdit || form.scope !== "repository" || !repositoryOptions.length}
             >
               <option value="">Choose repository</option>
               {repositoryOptions.map((repository) => (
@@ -2098,7 +2219,7 @@ function PolicyEditor({
           </label>
           <label>
             <span>Fail level</span>
-            <select value={form.failLevel} onChange={(event) => onFormChange((current) => ({ ...current, failLevel: event.target.value as RiskLevel }))} disabled={!liveData}>
+            <select value={form.failLevel} onChange={(event) => onFormChange((current) => ({ ...current, failLevel: event.target.value as RiskLevel }))} disabled={!canEdit}>
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
@@ -2110,7 +2231,7 @@ function PolicyEditor({
             <input
               value={form.maxFiles}
               onChange={(event) => onFormChange((current) => ({ ...current, maxFiles: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               inputMode="numeric"
             />
           </label>
@@ -2119,7 +2240,7 @@ function PolicyEditor({
             <input
               value={form.maxLines}
               onChange={(event) => onFormChange((current) => ({ ...current, maxLines: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               inputMode="numeric"
             />
           </label>
@@ -2131,7 +2252,7 @@ function PolicyEditor({
             <textarea
               value={form.criticalPathsText}
               onChange={(event) => onFormChange((current) => ({ ...current, criticalPathsText: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               rows={7}
             />
           </label>
@@ -2140,7 +2261,7 @@ function PolicyEditor({
             <textarea
               value={form.testPatternsText}
               onChange={(event) => onFormChange((current) => ({ ...current, testPatternsText: event.target.value }))}
-              disabled={!liveData}
+              disabled={!canEdit}
               rows={7}
             />
           </label>
@@ -2150,7 +2271,7 @@ function PolicyEditor({
           <legend>Rules</legend>
           {(Object.keys(ruleLabels) as RuleId[]).map((rule) => (
             <label className="checkbox-row" key={rule}>
-              <input type="checkbox" checked={form.rules[rule]} onChange={(event) => updateRule(rule, event.target.checked)} disabled={!liveData} />
+              <input type="checkbox" checked={form.rules[rule]} onChange={(event) => updateRule(rule, event.target.checked)} disabled={!canEdit} />
               <span>{ruleLabels[rule]}</span>
             </label>
           ))}
@@ -2162,12 +2283,12 @@ function PolicyEditor({
               type="checkbox"
               checked={form.enabled}
               onChange={(event) => onFormChange((current) => ({ ...current, enabled: event.target.checked }))}
-              disabled={!liveData}
+              disabled={!canEdit}
             />
             <span>Save as enabled</span>
           </label>
-          {status ? <span className="policy-status">{status}</span> : null}
-          <button className="primary" type="submit" disabled={!liveData || mode === "loading" || (form.scope === "repository" && !form.repositoryId)}>
+          {status || accessHint ? <span className="policy-status">{status || accessHint}</span> : null}
+          <button className="primary" type="submit" disabled={!canEdit || mode === "loading" || (form.scope === "repository" && !form.repositoryId)}>
             <ShieldCheck size={16} />
             Save policy
           </button>
@@ -2184,6 +2305,8 @@ function ApiKeyAdmin({
   newApiKeyName,
   newApiKeyRole,
   createdApiKey,
+  canManageGovernance,
+  accessHint,
   onNameChange,
   onRoleChange,
   onCreate,
@@ -2197,6 +2320,8 @@ function ApiKeyAdmin({
   newApiKeyName: string;
   newApiKeyRole: ApiKeyRole;
   createdApiKey: CreatedApiKey | null;
+  canManageGovernance: boolean;
+  accessHint: string | null;
   onNameChange: (value: string) => void;
   onRoleChange: (value: ApiKeyRole) => void;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -2205,6 +2330,7 @@ function ApiKeyAdmin({
   onRevoke: (apiKeyId: string) => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
+  const canEdit = liveData && canManageGovernance;
   return (
     <section className="api-key-panel" id="keys" aria-labelledby="api-key-admin-title">
       <div className="section-head">
@@ -2220,19 +2346,20 @@ function ApiKeyAdmin({
             value={newApiKeyName}
             onChange={(event) => onNameChange(event.target.value)}
             placeholder="Release bot"
-            disabled={!liveData}
+            disabled={!canEdit}
           />
-          <select aria-label="New key role" value={newApiKeyRole} onChange={(event) => onRoleChange(event.target.value as ApiKeyRole)} disabled={!liveData}>
+          <select aria-label="New key role" value={newApiKeyRole} onChange={(event) => onRoleChange(event.target.value as ApiKeyRole)} disabled={!canEdit}>
             <option value="admin">Admin</option>
             <option value="ci">CI</option>
             <option value="read_only">Read only</option>
           </select>
-          <button className="primary" type="submit" disabled={!liveData || !newApiKeyName.trim()}>
+          <button className="primary" type="submit" disabled={!canEdit || !newApiKeyName.trim()}>
             <KeyRound size={16} />
             Create
           </button>
         </form>
       </div>
+      {accessHint ? <span className="policy-status">{accessHint}</span> : null}
 
       {createdApiKey ? (
         <div className="one-time-key" role="status">
@@ -2263,7 +2390,7 @@ function ApiKeyAdmin({
             </tr>
           </thead>
           <tbody>
-            <ApiKeyRows apiKeys={apiKeys} mode={mode} liveData={liveData} onUpdateRole={onUpdateRole} onRevoke={onRevoke} />
+            <ApiKeyRows apiKeys={apiKeys} mode={mode} liveData={canEdit} onUpdateRole={onUpdateRole} onRevoke={onRevoke} />
           </tbody>
         </table>
       </div>
@@ -2515,6 +2642,67 @@ function buildAuditExportFilename(actionFilter: string, format: AuditExportForma
 
 function fileSafeSegment(value: string) {
   return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "all";
+}
+
+function normalizeAuth(payload: ApiAuthPayload): DashboardAuth {
+  return {
+    organizationId: payload.organization_id,
+    apiKeyId: payload.api_key_id,
+    apiKeyName: payload.api_key_name,
+    apiKeyRole: payload.api_key_role,
+  };
+}
+
+function getDashboardAccess(dataSource: DataSource, mode: LoadMode, auth: DashboardAuth | null): DashboardAccess {
+  const liveData = dataSource === "api" && mode !== "error";
+  const role = liveData ? auth?.apiKeyRole ?? null : null;
+  const canSubmitAnalysis = role === "admin" || role === "ci";
+  const canManageGovernance = role === "admin";
+  return {
+    role,
+    roleLabel: getRoleLabel(dataSource, role),
+    canSubmitAnalysis,
+    canManageGovernance,
+    analysisHint: canSubmitAnalysis ? null : getAnalysisAccessHint(dataSource, role),
+    governanceHint: canManageGovernance ? null : getGovernanceAccessHint(dataSource, role),
+  };
+}
+
+function getRoleLabel(dataSource: DataSource, role: ApiKeyRole | null) {
+  if (dataSource !== "api") {
+    return "Demo data";
+  }
+  return role ? `${formatApiKeyRole(role)} key` : "Checking key permissions";
+}
+
+function getAnalysisAccessHint(dataSource: DataSource, role: ApiKeyRole | null) {
+  if (dataSource !== "api") {
+    return null;
+  }
+  if (role === "read_only") {
+    return "Read-only keys can inspect analyses but cannot submit diffs.";
+  }
+  return null;
+}
+
+function getGovernanceAccessHint(dataSource: DataSource, role: ApiKeyRole | null) {
+  if (dataSource !== "api") {
+    return null;
+  }
+  if (role === "ci") {
+    return "CI keys can submit analyses but cannot manage governance.";
+  }
+  if (role === "read_only") {
+    return "Read-only keys cannot manage governance.";
+  }
+  return null;
+}
+
+function formatApiKeyRole(role: ApiKeyRole) {
+  if (role === "read_only") {
+    return "Read-only";
+  }
+  return role.toUpperCase();
 }
 
 function normalizeSummary(summary: ApiSummary): Analysis {

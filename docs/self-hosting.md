@@ -94,7 +94,7 @@ cd apps/web
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173` and paste the API key into the dashboard header. Without a key, the dashboard shows demo data.
+Open `http://127.0.0.1:5173` and paste the API key into the dashboard header. Without a key, the dashboard shows demo data. With a live key, the dashboard detects the key role through `/api/auth/me`: admin keys can manage users, repositories, policies, and keys; CI keys can submit analyses; read-only keys can inspect runs, governance state, and audit exports without mutation controls.
 
 ## 7. Configure Policies
 

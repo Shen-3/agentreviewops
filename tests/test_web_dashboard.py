@@ -36,6 +36,11 @@ def test_dashboard_contains_required_views() -> None:
     assert "auditActionFilter" in app_tsx
     assert "API key" in app_tsx
     assert "Authorization" in app_tsx
+    assert "/api/auth/me" in app_tsx
+    assert "canSubmitAnalysis" in app_tsx
+    assert "canManageGovernance" in app_tsx
+    assert "Read-only keys can inspect analyses but cannot submit diffs." in app_tsx
+    assert "CI keys can submit analyses but cannot manage governance." in app_tsx
 
 
 def test_dashboard_contains_empty_loading_error_states() -> None:
@@ -80,6 +85,7 @@ def test_dashboard_has_responsive_styles() -> None:
     assert ".risk-badge" in css
     assert ".policy-panel" in css
     assert ".policy-form" in css
+    assert ".access-badge" in css
     assert ".user-panel" in css
     assert ".user-create-form" in css
     assert ".api-key-table" in css
