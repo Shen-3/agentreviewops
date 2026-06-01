@@ -84,6 +84,23 @@ def delete_user(session: Session, record: UserRecord) -> None:
     session.commit()
 
 
+def update_user(
+    session: Session,
+    record: UserRecord,
+    *,
+    name: str | None = None,
+    role: str | None = None,
+) -> UserRecord:
+    if name is not None:
+        record.name = name
+    if role is not None:
+        record.role = role
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
 def create_repository(
     session: Session,
     *,
@@ -180,6 +197,19 @@ def delete_repository_membership(session: Session, record: RepositoryMembershipR
     session.commit()
 
 
+def update_repository_membership(
+    session: Session,
+    record: RepositoryMembershipRecord,
+    *,
+    role: str,
+) -> RepositoryMembershipRecord:
+    record.role = role
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
 def create_api_key(
     session: Session,
     *,
@@ -228,6 +258,23 @@ def revoke_api_key(session: Session, *, organization_id: str, api_key_id: str) -
         session.add(record)
         session.commit()
         session.refresh(record)
+    return record
+
+
+def update_api_key(
+    session: Session,
+    record: ApiKeyRecord,
+    *,
+    name: str | None = None,
+    role: str | None = None,
+) -> ApiKeyRecord:
+    if name is not None:
+        record.name = name
+    if role is not None:
+        record.role = role
+    session.add(record)
+    session.commit()
+    session.refresh(record)
     return record
 
 

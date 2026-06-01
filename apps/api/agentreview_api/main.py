@@ -22,13 +22,16 @@ from agentreview_api.audit import (
     AUDIT_ACTION_ANALYSIS_CREATED,
     AUDIT_ACTION_API_KEY_CREATED,
     AUDIT_ACTION_API_KEY_REVOKED,
+    AUDIT_ACTION_API_KEY_UPDATED,
     AUDIT_ACTION_POLICY_CREATED,
     AUDIT_ACTION_REPOSITORY_CREATED,
     AUDIT_ACTION_REPOSITORY_MEMBERSHIP_CREATED,
     AUDIT_ACTION_REPOSITORY_MEMBERSHIP_DELETED,
+    AUDIT_ACTION_REPOSITORY_MEMBERSHIP_UPDATED,
     AUDIT_ACTION_RETENTION_PURGED,
     AUDIT_ACTION_USER_CREATED,
     AUDIT_ACTION_USER_DELETED,
+    AUDIT_ACTION_USER_UPDATED,
 )
 from agentreview_api.auth import AuthContext, require_admin_api_key, require_analysis_api_key, require_api_key
 from agentreview_api.db import PolicyRecord, RepositoryRecord, get_session
@@ -45,6 +48,7 @@ from agentreview_api.repository import (
     delete_repository_membership,
     delete_user,
     get_analysis_run,
+    get_api_key,
     get_enabled_policy,
     get_enabled_repository_policy,
     get_repository,
@@ -62,6 +66,9 @@ from agentreview_api.repository import (
     revoke_api_key,
     to_diff_files,
     to_risk_findings,
+    update_api_key,
+    update_repository_membership,
+    update_user,
 )
 
 app = FastAPI(
@@ -81,7 +88,7 @@ app.add_middleware(
         "http://localhost:4173",
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -184,6 +191,11 @@ class UserCreateRequest(BaseModel):
     role: str = Field(default="reviewer", pattern="^(admin|reviewer)$")
 
 
+class UserUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    role: str | None = Field(default=None, pattern="^(admin|reviewer)$")
+
+
 class UserResponse(BaseModel):
     user_id: str
     email: str
@@ -195,6 +207,10 @@ class UserResponse(BaseModel):
 class RepositoryMembershipCreateRequest(BaseModel):
     user_id: str = Field(min_length=1)
     role: str = Field(default="reviewer", pattern="^(owner|maintainer|reviewer)$")
+
+
+class RepositoryMembershipUpdateRequest(BaseModel):
+    role: str = Field(pattern="^(owner|maintainer|reviewer)$")
 
 
 class ApiKeyResponse(BaseModel):
@@ -209,6 +225,11 @@ class ApiKeyResponse(BaseModel):
 
 class ApiKeyCreateResponse(ApiKeyResponse):
     api_key: str
+
+
+class ApiKeyUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    role: str | None = Field(default=None, pattern="^(admin|ci|read_only)$")
 
 
 class PolicyCreateRequest(BaseModel):
@@ -425,6 +446,46 @@ def remove_repository_membership(
     return _repository_response(refreshed)
 
 
+@app.patch("/api/repositories/{repository_id}/memberships/{user_id}", response_model=RepositoryResponse)
+def update_repository_membership_role(
+    repository_id: str,
+    user_id: str,
+    request: RepositoryMembershipUpdateRequest,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> RepositoryResponse:
+    repository = get_repository(session, organization_id=auth.organization_id, repository_id=repository_id)
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    membership = get_repository_membership(session, repository_id=repository.id, user_id=user_id)
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Repository membership not found")
+
+    previous_role = membership.role
+    updated = update_repository_membership(session, membership, role=request.role)
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_REPOSITORY_MEMBERSHIP_UPDATED,
+        target_type="repository",
+        target_id=repository.id,
+        metadata={
+            "repository": f"{repository.owner}/{repository.name}",
+            "user_id": user_id,
+            "membership_id": updated.id,
+            "previous_role": previous_role,
+            "membership_role": updated.role,
+        },
+    )
+    refreshed = get_repository(session, organization_id=auth.organization_id, repository_id=repository.id)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return _repository_response(refreshed)
+
+
 @app.get("/api/users", response_model=list[UserResponse])
 def get_users(auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)) -> list[UserResponse]:
     return [_user_response(record) for record in list_users(session, organization_id=auth.organization_id)]
@@ -467,6 +528,38 @@ def create_org_user(
         },
     )
     return _user_response(record)
+
+
+@app.patch("/api/users/{user_id}", response_model=UserResponse)
+def update_org_user(
+    user_id: str,
+    request: UserUpdateRequest,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> UserResponse:
+    record = get_user(session, organization_id=auth.organization_id, user_id=user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if request.role == "reviewer" and record.role == "admin" and count_admin_users(session, organization_id=auth.organization_id) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot demote the last organization admin")
+
+    previous_role = record.role
+    name = request.name.strip() if request.name is not None and request.name.strip() else record.name
+    updated = update_user(session, record, name=name, role=request.role)
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_USER_UPDATED,
+        target_type="user",
+        target_id=updated.id,
+        metadata={
+            "previous_role": previous_role,
+            "user_role": updated.role,
+        },
+    )
+    return _user_response(updated)
 
 
 @app.delete("/api/users/{user_id}", status_code=204)
@@ -537,6 +630,41 @@ def create_org_api_key(
         **_api_key_response(record, auth=auth).model_dump(),
         api_key=secret,
     )
+
+
+@app.patch("/api/api-keys/{api_key_id}", response_model=ApiKeyResponse)
+def update_org_api_key(
+    api_key_id: str,
+    request: ApiKeyUpdateRequest,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> ApiKeyResponse:
+    record = get_api_key(session, organization_id=auth.organization_id, api_key_id=api_key_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    if record.revoked_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot update a revoked API key")
+    if record.id == auth.api_key_id and request.role is not None and request.role != "admin":
+        raise HTTPException(status_code=400, detail="Cannot change the current admin API key to a non-admin role")
+
+    previous_role = record.role
+    name = request.name.strip() if request.name is not None and request.name.strip() else record.name
+    updated = update_api_key(session, record, name=name, role=request.role)
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_API_KEY_UPDATED,
+        target_type="api_key",
+        target_id=updated.id,
+        metadata={
+            "api_key_name": updated.name,
+            "previous_role": previous_role,
+            "api_key_role": updated.role,
+        },
+    )
+    return _api_key_response(updated, auth=auth)
 
 
 @app.post("/api/api-keys/{api_key_id}/revoke", response_model=ApiKeyResponse)

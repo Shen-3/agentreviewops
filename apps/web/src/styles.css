@@ -705,6 +705,11 @@ td {
   font-size: 13px;
 }
 
+td select {
+  min-width: 120px;
+  padding: 0 8px;
+}
+
 th {
   background: var(--surface-quiet);
   color: var(--muted);
@@ -777,6 +782,11 @@ tr:last-child td {
 .reviewer-pill button {
   min-height: 24px;
   padding: 0 8px;
+}
+
+.reviewer-pill select {
+  min-height: 24px;
+  padding: 0 6px;
 }
 
 .metadata-pill {

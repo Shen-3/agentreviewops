@@ -409,6 +409,88 @@ def test_api_key_roles_limit_mutating_and_analysis_access(client: TestClient) ->
     assert read_only_list_response.status_code == 200
 
 
+def test_role_update_endpoints_audit_and_protect_admins(client: TestClient) -> None:
+    initial_admin = client.get("/api/users").json()[0]
+    create_user_response = client.post(
+        "/api/users",
+        json={
+            "email": "role-editor@example.com",
+            "name": "Role Editor",
+            "role": "reviewer",
+        },
+    )
+    assert create_user_response.status_code == 200
+    role_editor = create_user_response.json()
+
+    promote_response = client.patch(
+        f"/api/users/{role_editor['user_id']}",
+        json={"role": "admin"},
+    )
+    assert promote_response.status_code == 200
+    assert promote_response.json()["role"] == "admin"
+
+    demote_first_admin_response = client.patch(
+        f"/api/users/{initial_admin['user_id']}",
+        json={"role": "reviewer"},
+    )
+    assert demote_first_admin_response.status_code == 200
+    assert demote_first_admin_response.json()["role"] == "reviewer"
+
+    demote_last_admin_response = client.patch(
+        f"/api/users/{role_editor['user_id']}",
+        json={"role": "reviewer"},
+    )
+    assert demote_last_admin_response.status_code == 400
+    assert demote_last_admin_response.json() == {"detail": "Cannot demote the last organization admin"}
+
+    key_response = client.post(
+        "/api/api-keys",
+        json={
+            "name": "Mutable key",
+            "role": "read_only",
+        },
+    )
+    assert key_response.status_code == 200
+    key_id = key_response.json()["api_key_id"]
+    update_key_response = client.patch(
+        f"/api/api-keys/{key_id}",
+        json={"role": "ci"},
+    )
+    assert update_key_response.status_code == 200
+    assert update_key_response.json()["role"] == "ci"
+
+    current_key_id = client.get("/api/auth/me").json()["api_key_id"]
+    demote_current_key_response = client.patch(
+        f"/api/api-keys/{current_key_id}",
+        json={"role": "read_only"},
+    )
+    assert demote_current_key_response.status_code == 400
+    assert demote_current_key_response.json() == {"detail": "Cannot change the current admin API key to a non-admin role"}
+
+    repository = client.get("/api/repositories").json()[0]
+    assign_response = client.post(
+        f"/api/repositories/{repository['repository_id']}/memberships",
+        json={
+            "user_id": role_editor["user_id"],
+            "role": "reviewer",
+        },
+    )
+    assert assign_response.status_code == 200
+
+    update_membership_response = client.patch(
+        f"/api/repositories/{repository['repository_id']}/memberships/{role_editor['user_id']}",
+        json={"role": "owner"},
+    )
+    assert update_membership_response.status_code == 200
+    reviewer_roles = {reviewer["email"]: reviewer["role"] for reviewer in update_membership_response.json()["reviewers"]}
+    assert reviewer_roles["role-editor@example.com"] == "owner"
+
+    actions = [event["action"] for event in client.get("/api/audit-events").json()]
+    assert "user.updated" in actions
+    assert "api_key.updated" in actions
+    assert "repository_membership.updated" in actions
+
+
 def test_policy_create_list_and_org_override_applies_to_analysis(client: TestClient) -> None:
     policy_response = client.post(
         "/api/policies",

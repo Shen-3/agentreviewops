@@ -897,6 +897,33 @@ function Dashboard() {
       setMode("error");
     }
   };
+  const updateDashboardMembershipRole = async (repositoryId: string, userId: string, role: "owner" | "maintainer" | "reviewer") => {
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/repositories/${repositoryId}/memberships/${userId}`, apiKey, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ role }),
+      });
+      const repository = normalizeRepository((await response.json()) as ApiRepositoryPayload);
+      setRepositories((current) => current.map((record) => (record.id === repository.id ? repository : record)));
+      setMembershipStatus(`${repository.fullName} routing updated.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setMode("error");
+        return;
+      }
+      setMembershipStatus("Reviewer role could not be updated.");
+      setMode("error");
+    }
+  };
   const deleteDashboardUser = async (userId: string) => {
     if (!apiKey || dataSource !== "api") {
       return;
@@ -919,6 +946,60 @@ function Dashboard() {
       if (!(error instanceof Error) || !error.message.includes("400")) {
         setMode("error");
       }
+    }
+  };
+  const updateDashboardUserRole = async (userId: string, role: "admin" | "reviewer") => {
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/users/${userId}`, apiKey, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ role }),
+      });
+      const user = normalizeUser((await response.json()) as ApiUserPayload);
+      setUsers((current) => current.map((record) => (record.id === user.id ? user : record)));
+      setUserStatus(`${user.email} role updated.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setMode("error");
+        return;
+      }
+      setUserStatus(error instanceof Error && error.message.includes("400") ? "Cannot demote the last admin." : "User role could not be updated.");
+      if (!(error instanceof Error) || !error.message.includes("400")) {
+        setMode("error");
+      }
+    }
+  };
+  const updateDashboardApiKeyRole = async (apiKeyId: string, role: ApiKeyRole) => {
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/api-keys/${apiKeyId}`, apiKey, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ role }),
+      });
+      const updated = normalizeApiKey((await response.json()) as ApiKeyPayload);
+      setApiKeys((current) => current.map((record) => (record.id === updated.id ? updated : record)));
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setMode("error");
+        return;
+      }
+      setMode("error");
     }
   };
   const revokeDashboardApiKey = async (apiKeyId: string) => {
@@ -1217,6 +1298,7 @@ function Dashboard() {
           onMembershipFormChange={setMembershipForm}
           onAssignMembership={assignDashboardMembership}
           onRemoveMembership={(repositoryId, userId) => void removeDashboardMembership(repositoryId, userId)}
+          onUpdateMembershipRole={(repositoryId, userId, role) => void updateDashboardMembershipRole(repositoryId, userId, role)}
         />
 
         <UserAdmin
@@ -1227,6 +1309,7 @@ function Dashboard() {
           status={userStatus}
           onFormChange={setUserForm}
           onCreate={createDashboardUser}
+          onUpdateRole={(userId, role) => void updateDashboardUserRole(userId, role)}
           onDelete={(userId) => void deleteDashboardUser(userId)}
         />
 
@@ -1252,6 +1335,7 @@ function Dashboard() {
           onRoleChange={setNewApiKeyRole}
           onCreate={createDashboardApiKey}
           onDismissCreated={() => setCreatedApiKey(null)}
+          onUpdateRole={(apiKeyId, role) => void updateDashboardApiKeyRole(apiKeyId, role)}
           onRevoke={(apiKeyId) => void revokeDashboardApiKey(apiKeyId)}
         />
 
@@ -1548,6 +1632,7 @@ function RepositoryAdmin({
   onMembershipFormChange,
   onAssignMembership,
   onRemoveMembership,
+  onUpdateMembershipRole,
 }: {
   repositories: RepositoryRecord[];
   users: UserRecord[];
@@ -1562,6 +1647,7 @@ function RepositoryAdmin({
   onMembershipFormChange: React.Dispatch<React.SetStateAction<MembershipFormState>>;
   onAssignMembership: (event: React.FormEvent<HTMLFormElement>) => void;
   onRemoveMembership: (repositoryId: string, userId: string) => void;
+  onUpdateMembershipRole: (repositoryId: string, userId: string, role: "owner" | "maintainer" | "reviewer") => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
   return (
@@ -1684,7 +1770,7 @@ function RepositoryAdmin({
             </tr>
           </thead>
           <tbody>
-            <RepositoryRows repositories={repositories} mode={mode} liveData={liveData} onRemoveMembership={onRemoveMembership} />
+            <RepositoryRows repositories={repositories} mode={mode} liveData={liveData} onRemoveMembership={onRemoveMembership} onUpdateMembershipRole={onUpdateMembershipRole} />
           </tbody>
         </table>
       </div>
@@ -1697,11 +1783,13 @@ function RepositoryRows({
   mode,
   liveData,
   onRemoveMembership,
+  onUpdateMembershipRole,
 }: {
   repositories: RepositoryRecord[];
   mode: LoadMode;
   liveData: boolean;
   onRemoveMembership: (repositoryId: string, userId: string) => void;
+  onUpdateMembershipRole: (repositoryId: string, userId: string, role: "owner" | "maintainer" | "reviewer") => void;
 }) {
   if (mode === "loading") {
     return <RepositoryEmptyRow message="Loading repositories..." />;
@@ -1721,7 +1809,7 @@ function RepositoryRows({
           <td>{repository.defaultBranch || "-"}</td>
           <td>{repository.visibility || "-"}</td>
           <td>
-            <ReviewersCell repository={repository} liveData={liveData} onRemoveMembership={onRemoveMembership} />
+            <ReviewersCell repository={repository} liveData={liveData} onRemoveMembership={onRemoveMembership} onUpdateMembershipRole={onUpdateMembershipRole} />
           </td>
           <td>{repository.createdAt}</td>
         </tr>
@@ -1734,10 +1822,12 @@ function ReviewersCell({
   repository,
   liveData,
   onRemoveMembership,
+  onUpdateMembershipRole,
 }: {
   repository: RepositoryRecord;
   liveData: boolean;
   onRemoveMembership: (repositoryId: string, userId: string) => void;
+  onUpdateMembershipRole: (repositoryId: string, userId: string, role: "owner" | "maintainer" | "reviewer") => void;
 }) {
   if (!repository.reviewers.length) {
     return <>No reviewers assigned</>;
@@ -1746,7 +1836,17 @@ function ReviewersCell({
     <div className="reviewer-list">
       {repository.reviewers.map((reviewer) => (
         <span className="reviewer-pill" key={reviewer.userId}>
-          {reviewer.name || reviewer.email} ({reviewer.role})
+          {reviewer.name || reviewer.email}
+          <select
+            aria-label={`Role for ${reviewer.name || reviewer.email}`}
+            value={reviewer.role}
+            onChange={(event) => onUpdateMembershipRole(repository.id, reviewer.userId, event.target.value as "owner" | "maintainer" | "reviewer")}
+            disabled={!liveData}
+          >
+            <option value="owner">Owner</option>
+            <option value="maintainer">Maintainer</option>
+            <option value="reviewer">Reviewer</option>
+          </select>
           <button type="button" disabled={!liveData} onClick={() => onRemoveMembership(repository.id, reviewer.userId)} aria-label={`Remove ${reviewer.name || reviewer.email} from ${repository.fullName}`}>
             Remove
           </button>
@@ -1772,6 +1872,7 @@ function UserAdmin({
   status,
   onFormChange,
   onCreate,
+  onUpdateRole,
   onDelete,
 }: {
   users: UserRecord[];
@@ -1781,6 +1882,7 @@ function UserAdmin({
   status: string;
   onFormChange: React.Dispatch<React.SetStateAction<UserFormState>>;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
+  onUpdateRole: (userId: string, role: "admin" | "reviewer") => void;
   onDelete: (userId: string) => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
@@ -1836,7 +1938,7 @@ function UserAdmin({
             </tr>
           </thead>
           <tbody>
-            <UserRows users={users} mode={mode} liveData={liveData} onDelete={onDelete} />
+            <UserRows users={users} mode={mode} liveData={liveData} onUpdateRole={onUpdateRole} onDelete={onDelete} />
           </tbody>
         </table>
       </div>
@@ -1848,11 +1950,13 @@ function UserRows({
   users,
   mode,
   liveData,
+  onUpdateRole,
   onDelete,
 }: {
   users: UserRecord[];
   mode: LoadMode;
   liveData: boolean;
+  onUpdateRole: (userId: string, role: "admin" | "reviewer") => void;
   onDelete: (userId: string) => void;
 }) {
   if (mode === "loading") {
@@ -1872,7 +1976,12 @@ function UserRows({
             <strong>{user.name || user.email}</strong>
             <span className="table-subtext">{user.email}</span>
           </td>
-          <td>{user.role}</td>
+          <td>
+            <select value={user.role} onChange={(event) => onUpdateRole(user.id, event.target.value as "admin" | "reviewer")} disabled={!liveData}>
+              <option value="admin">Admin</option>
+              <option value="reviewer">Reviewer</option>
+            </select>
+          </td>
           <td>{user.createdAt}</td>
           <td>
             <button type="button" disabled={!liveData} onClick={() => onDelete(user.id)}>
@@ -2079,6 +2188,7 @@ function ApiKeyAdmin({
   onRoleChange,
   onCreate,
   onDismissCreated,
+  onUpdateRole,
   onRevoke,
 }: {
   apiKeys: ApiKeyRecord[];
@@ -2091,6 +2201,7 @@ function ApiKeyAdmin({
   onRoleChange: (value: ApiKeyRole) => void;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onDismissCreated: () => void;
+  onUpdateRole: (apiKeyId: string, role: ApiKeyRole) => void;
   onRevoke: (apiKeyId: string) => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
@@ -2152,7 +2263,7 @@ function ApiKeyAdmin({
             </tr>
           </thead>
           <tbody>
-            <ApiKeyRows apiKeys={apiKeys} mode={mode} liveData={liveData} onRevoke={onRevoke} />
+            <ApiKeyRows apiKeys={apiKeys} mode={mode} liveData={liveData} onUpdateRole={onUpdateRole} onRevoke={onRevoke} />
           </tbody>
         </table>
       </div>
@@ -2164,11 +2275,13 @@ function ApiKeyRows({
   apiKeys,
   mode,
   liveData,
+  onUpdateRole,
   onRevoke,
 }: {
   apiKeys: ApiKeyRecord[];
   mode: LoadMode;
   liveData: boolean;
+  onUpdateRole: (apiKeyId: string, role: ApiKeyRole) => void;
   onRevoke: (apiKeyId: string) => void;
 }) {
   if (mode === "loading") {
@@ -2190,7 +2303,13 @@ function ApiKeyRows({
               {record.name}
               {record.isCurrent ? <span className="current-key-label">Current</span> : null}
             </td>
-            <td>{formatApiKeyRole(record.role)}</td>
+            <td>
+              <select value={record.role} onChange={(event) => onUpdateRole(record.id, event.target.value as ApiKeyRole)} disabled={!liveData || revoked || record.isCurrent}>
+                <option value="admin">Admin</option>
+                <option value="ci">CI</option>
+                <option value="read_only">Read only</option>
+              </select>
+            </td>
             <td>{record.keyPrefix}</td>
             <td>{record.createdAt}</td>
             <td>
@@ -2569,13 +2688,6 @@ function policyScopeLabel(policy: PolicyRecord) {
     return policy.repositoryFullName ? `Repository: ${policy.repositoryFullName}` : "Repository policy";
   }
   return "Organization policy";
-}
-
-function formatApiKeyRole(role: ApiKeyRole) {
-  if (role === "read_only") {
-    return "Read only";
-  }
-  return role === "ci" ? "CI" : "Admin";
 }
 
 function policyConfigFromForm(form: PolicyFormState): PolicyConfigPayload | null {

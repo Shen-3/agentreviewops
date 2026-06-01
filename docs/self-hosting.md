@@ -96,7 +96,7 @@ Open `http://127.0.0.1:5173` and paste the API key into the dashboard header. Wi
 
 ## 7. Configure Policies
 
-Create organization users from the dashboard or `POST /api/users`, then onboard repositories from the dashboard or `POST /api/repositories`. Assign users to repositories with the dashboard routing form or `POST /api/repositories/{repository_id}/memberships`. Remove stale users or reviewer assignments from the same dashboard panels or with the matching `DELETE` endpoints. These governance endpoints require an admin API key.
+Create organization users from the dashboard or `POST /api/users`, then onboard repositories from the dashboard or `POST /api/repositories`. Assign users to repositories with the dashboard routing form or `POST /api/repositories/{repository_id}/memberships`. Update roles from the dashboard or the matching `PATCH` endpoints. Remove stale users or reviewer assignments from the same dashboard panels or with the matching `DELETE` endpoints. These governance endpoints require an admin API key.
 
 Policies saved with `scope: "repository"` and a repository ID apply before organization policies when `POST /api/analyze/diff` receives a matching `repository` value such as `owner/name`. If no repository policy matches, AgentReviewOps uses the latest enabled organization policy, then request config, then defaults.
 

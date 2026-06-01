@@ -50,6 +50,7 @@ def test_dashboard_contains_empty_loading_error_states() -> None:
     assert "/api/users" in app_tsx
     assert "/api/repositories" in app_tsx
     assert "/memberships" in app_tsx
+    assert 'method: "PATCH"' in app_tsx
     assert 'method: "DELETE"' in app_tsx
     assert "/api/policies" in app_tsx
     assert "repository_id" in app_tsx
