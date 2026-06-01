@@ -49,12 +49,14 @@ def test_admin_bootstrap_creates_org_user_and_one_time_api_key(tmp_path: Path, m
         record = session.scalar(select(ApiKeyRecord).where(ApiKeyRecord.key_prefix == key_prefix(api_key)))
         assert record is not None
         assert record.name == "Local CI"
+        assert record.role == "admin"
         assert record.key_hash != api_key
         auth = authenticate_api_key(session, api_key)
         audit_events = list(session.scalars(select(AuditEventRecord).order_by(AuditEventRecord.created_at)).all())
 
     assert auth is not None
     assert auth.api_key_name == "Local CI"
+    assert auth.api_key_role == "admin"
     assert [event.action for event in audit_events] == ["organization.bootstrapped", "api_key.created"]
     assert "Reviewer@Example.COM" not in str([event.metadata_json for event in audit_events])
     assert api_key not in str([event.metadata_json for event in audit_events])

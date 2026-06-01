@@ -7,12 +7,11 @@ import httpx
 import typer
 
 from agentreview import __version__
+from agentreview.ai import AIProviderConfigError, AIProviderRequestError
+from agentreview.analysis import analyze_diff_text
 from agentreview.config import ConfigError, DEFAULT_CONFIG_PATH, load_config
-from agentreview.gitdiff import parse_diff_file
-from agentreview.gitdiff import parse_unified_diff
-from agentreview.integrations.github import GitHubIntegrationError, MissingGitHubTokenError, fetch_pull_request_diff
-from agentreview.report import generate_markdown_report
-from agentreview.risk import analyze_risk
+from agentreview.integrations.github import GitHubIntegrationError, MissingGitHubTokenError, fetch_pull_request_diff, upsert_pull_request_comment
+from agentreview.plugins import PluginError
 
 app = typer.Typer(
     name="agentreview",
@@ -136,25 +135,35 @@ def scan_diff(
     """Analyze a unified diff and write a Markdown review report."""
     try:
         config = load_config(config_path)
-        changed_files = parse_diff_file(diff_file, config=config)
-        analysis = analyze_risk(changed_files, config=config)
-        report = generate_markdown_report(analysis, changed_files, config=config)
+        result = analyze_diff_text(diff_file.read_text(encoding="utf-8"), config=config)
     except ConfigError as exc:
         typer.echo(f"Config error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
+    except PluginError as exc:
+        typer.echo(f"Plugin error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except AIProviderConfigError as exc:
+        typer.echo(f"AI configuration error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except AIProviderRequestError as exc:
+        typer.echo(f"AI provider error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except OSError as exc:
+        typer.echo(f"Could not read diff file {diff_file}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(report, encoding="utf-8")
+        output.write_text(result.markdown, encoding="utf-8")
     except OSError as exc:
         typer.echo(f"Could not write report to {output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     typer.echo("AgentReviewOps")
-    typer.echo(f"Risk: {analysis.risk_level.upper()} {analysis.risk_score}/100")
+    typer.echo(f"Risk: {result.analysis.risk_level.upper()} {result.analysis.risk_score}/100")
     typer.echo("")
     typer.echo("Findings:")
-    positive_findings = [finding for finding in analysis.findings if finding.score_delta > 0]
+    positive_findings = [finding for finding in result.analysis.findings if finding.score_delta > 0]
     if positive_findings:
         for finding in positive_findings:
             file_path = finding.file_path or "change set"
@@ -291,17 +300,29 @@ def scan_pr(
         dir_okay=False,
         help="Path where the Markdown report will be written.",
     ),
+    comment: bool = typer.Option(
+        False,
+        "--comment/--no-comment",
+        help="Post or update the generated report as a GitHub pull request comment.",
+    ),
 ) -> None:
     """Fetch a GitHub pull request diff and write a Markdown review report."""
     try:
         config = load_config(config_path)
         diff_text = fetch_pull_request_diff(repo=repo, pr_number=pr_number, token=os.environ.get("GITHUB_TOKEN"))
-        changed_files = parse_unified_diff(diff_text, config=config)
-        analysis = analyze_risk(changed_files, config=config)
-        report = generate_markdown_report(analysis, changed_files, config=config)
+        result = analyze_diff_text(diff_text, config=config)
     except ConfigError as exc:
         typer.echo(f"Config error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
+    except PluginError as exc:
+        typer.echo(f"Plugin error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except AIProviderConfigError as exc:
+        typer.echo(f"AI configuration error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except AIProviderRequestError as exc:
+        typer.echo(f"AI provider error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     except MissingGitHubTokenError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
@@ -311,15 +332,78 @@ def scan_pr(
 
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(report, encoding="utf-8")
+        output.write_text(result.markdown, encoding="utf-8")
     except OSError as exc:
         typer.echo(f"Could not write report to {output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     typer.echo("AgentReviewOps")
     typer.echo(f"GitHub PR: {repo}#{pr_number}")
-    typer.echo(f"Risk: {analysis.risk_level.upper()} {analysis.risk_score}/100")
+    typer.echo(f"Risk: {result.analysis.risk_level.upper()} {result.analysis.risk_score}/100")
     typer.echo(f"Report written to: {output}")
+    if comment:
+        try:
+            comment_url = upsert_pull_request_comment(
+                repo=repo,
+                pr_number=pr_number,
+                body=result.markdown,
+                token=os.environ.get("GITHUB_TOKEN"),
+            )
+        except MissingGitHubTokenError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except GitHubIntegrationError as exc:
+            typer.echo(f"GitHub error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        typer.echo(f"GitHub comment: {comment_url}")
+
+
+@app.command("comment-pr")
+def comment_pr(
+    repo: str = typer.Option(
+        ...,
+        "--repo",
+        help="GitHub repository in owner/name format.",
+    ),
+    pr_number: int = typer.Option(
+        ...,
+        "--pr",
+        min=1,
+        help="Pull request number to comment on.",
+    ),
+    report_file: Path = typer.Option(
+        Path("agentreview-report.md"),
+        "--report-file",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Markdown report file to post or update as a PR comment.",
+    ),
+) -> None:
+    """Post or update an AgentReviewOps report comment on a GitHub pull request."""
+    try:
+        report = report_file.read_text(encoding="utf-8")
+        comment_url = upsert_pull_request_comment(
+            repo=repo,
+            pr_number=pr_number,
+            body=report,
+            token=os.environ.get("GITHUB_TOKEN"),
+        )
+    except OSError as exc:
+        typer.echo(f"Could not read report file {report_file}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except MissingGitHubTokenError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except GitHubIntegrationError as exc:
+        typer.echo(f"GitHub error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo("AgentReviewOps")
+    typer.echo(f"GitHub PR: {repo}#{pr_number}")
+    typer.echo(f"GitHub comment: {comment_url}")
 
 
 def _response_error_detail(response: httpx.Response) -> str:

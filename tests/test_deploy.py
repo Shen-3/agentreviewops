@@ -44,3 +44,20 @@ def test_dockerignore_excludes_heavy_and_secret_local_files() -> None:
     assert "apps/web/dist/" in dockerignore
     assert ".env" in dockerignore
     assert "agentreview.db" in dockerignore
+
+
+def test_ci_runs_python_tests_and_web_build() -> None:
+    workflow = yaml.safe_load((PROJECT_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"))
+
+    jobs = workflow["jobs"]
+    assert "python-test" in jobs
+    assert "web-build" in jobs
+
+    python_steps = jobs["python-test"]["steps"]
+    assert any(step.get("run") == 'python -m pip install -e ".[dev]"' for step in python_steps)
+    assert any(step.get("run") == "pytest" for step in python_steps)
+
+    web_steps = jobs["web-build"]["steps"]
+    assert any(step.get("uses") == "actions/setup-node@v4" for step in web_steps)
+    assert any(step.get("working-directory") == "apps/web" and step.get("run") == "npm ci" for step in web_steps)
+    assert any(step.get("working-directory") == "apps/web" and step.get("run") == "npm run build" for step in web_steps)

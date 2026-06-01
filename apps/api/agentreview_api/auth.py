@@ -20,6 +20,7 @@ class AuthContext:
     organization_id: str
     api_key_id: str
     api_key_name: str
+    api_key_role: str
 
 
 def generate_api_key() -> str:
@@ -54,6 +55,7 @@ def authenticate_api_key(session: Session, secret: str) -> AuthContext | None:
         organization_id=record.organization_id,
         api_key_id=record.id,
         api_key_name=record.name,
+        api_key_role=record.role,
     )
 
 
@@ -69,6 +71,24 @@ def require_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Valid AgentReviewOps API key required",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    return auth
+
+
+def require_admin_api_key(auth: AuthContext = Depends(require_api_key)) -> AuthContext:
+    if auth.api_key_role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin AgentReviewOps API key required",
+        )
+    return auth
+
+
+def require_analysis_api_key(auth: AuthContext = Depends(require_api_key)) -> AuthContext:
+    if auth.api_key_role not in {"admin", "ci"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or CI AgentReviewOps API key required",
         )
     return auth
 

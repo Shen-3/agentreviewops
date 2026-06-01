@@ -5,7 +5,7 @@ import pytest
 from agentreview.config import parse_config
 from agentreview.example_plugins import DependencyManifestPlugin
 from agentreview.models import DiffFile, RiskFinding
-from agentreview.plugins import AnalysisContext, PluginError, run_analyzer_plugins
+from agentreview.plugins import AnalysisContext, PluginError, load_analyzer_plugins, run_analyzer_plugins
 from agentreview.risk import analyze_risk
 
 
@@ -49,6 +49,13 @@ class SlowPlugin:
         return []
 
 
+class FakeEntryPoint:
+    name = "counting"
+
+    def load(self):
+        return CountingPlugin
+
+
 def test_disabled_plugin_does_nothing() -> None:
     plugin = CountingPlugin()
     config = parse_config({"version": 1})
@@ -57,6 +64,20 @@ def test_disabled_plugin_does_nothing() -> None:
 
     assert findings == []
     assert plugin.calls == 0
+
+
+def test_load_analyzer_plugins_includes_builtin_plugin() -> None:
+    plugins = load_analyzer_plugins()
+
+    assert "dependency-manifest" in {plugin.id for plugin in plugins}
+
+
+def test_load_analyzer_plugins_discovers_entry_points(monkeypatch) -> None:
+    monkeypatch.setattr("agentreview.plugins.entry_points", lambda: [FakeEntryPoint()])
+
+    plugins = load_analyzer_plugins()
+
+    assert {"dependency-manifest", "counting"} == {plugin.id for plugin in plugins}
 
 
 def test_enabled_example_plugin_adds_validated_finding_to_analysis() -> None:
@@ -97,6 +118,24 @@ def test_enabled_plugin_requires_explicit_permissions() -> None:
     )
 
     with pytest.raises(PluginError, match="requires explicit permission"):
+        run_analyzer_plugins([CountingPlugin()], AnalysisContext(changed_files=[], config=config))
+
+
+def test_enabled_missing_plugin_fails_clearly() -> None:
+    config = parse_config(
+        {
+            "version": 1,
+            "plugins": [
+                {
+                    "id": "missing",
+                    "enabled": True,
+                    "permissions": ["read_diff"],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(PluginError, match="Enabled plugin\\(s\\) not installed: missing"):
         run_analyzer_plugins([CountingPlugin()], AnalysisContext(changed_files=[], config=config))
 
 

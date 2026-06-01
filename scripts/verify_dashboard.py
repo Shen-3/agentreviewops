@@ -16,7 +16,7 @@ def main() -> None:
         page.goto(DASHBOARD_URL)
         page.get_by_text("AI pull request review queue").wait_for()
         page.get_by_text("Analysis runs").wait_for()
-        page.get_by_text("API unavailable. Showing demo analysis data.").wait_for()
+        page.get_by_text("No API key configured. Showing demo analysis and audit data.").wait_for()
         page.locator(".analysis-row", has_text="platform/checkout-api").first.wait_for()
         page.get_by_role("heading", name="Findings").wait_for()
         page.get_by_role("heading", name="Report preview").wait_for()

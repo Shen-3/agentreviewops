@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -7,10 +8,13 @@ from typer.testing import CliRunner
 
 from agentreview.cli import app
 from agentreview.integrations.github import (
+    AGENTREVIEW_COMMENT_MARKER,
     GITHUB_DIFF_ACCEPT,
+    GITHUB_JSON_ACCEPT,
     GitHubIntegrationError,
     MissingGitHubTokenError,
     fetch_pull_request_diff,
+    upsert_pull_request_comment,
 )
 
 
@@ -97,6 +101,71 @@ def test_github_http_error_does_not_include_token() -> None:
         raise AssertionError("Expected GitHubIntegrationError")
 
 
+def test_upsert_pull_request_comment_posts_when_no_existing_comment() -> None:
+    calls = []
+
+    def fake_opener(request, timeout):
+        calls.append(
+            {
+                "url": request.full_url,
+                "method": request.get_method(),
+                "headers": dict(request.header_items()),
+                "body": request.data.decode("utf-8") if request.data else "",
+                "timeout": timeout,
+            }
+        )
+        if request.get_method() == "GET":
+            return FakeResponse("[]")
+        return FakeResponse(json.dumps({"html_url": "https://github.com/octo/example/pull/123#issuecomment-1"}))
+
+    comment_url = upsert_pull_request_comment(
+        repo="octo/example",
+        pr_number=123,
+        body="# AgentReviewOps Report",
+        token="secret-token",
+        opener=fake_opener,
+    )
+
+    assert comment_url.endswith("#issuecomment-1")
+    assert [call["method"] for call in calls] == ["GET", "POST"]
+    assert calls[0]["headers"]["Accept"] == GITHUB_JSON_ACCEPT
+    assert calls[0]["timeout"] == 30
+    assert calls[1]["url"] == "https://api.github.com/repos/octo/example/issues/123/comments"
+    assert calls[1]["headers"]["Authorization"] == "Bearer secret-token"
+    posted_body = json.loads(calls[1]["body"])["body"]
+    assert AGENTREVIEW_COMMENT_MARKER in posted_body
+    assert "# AgentReviewOps Report" in posted_body
+
+
+def test_upsert_pull_request_comment_patches_existing_agentreview_comment() -> None:
+    calls = []
+
+    def fake_opener(request, timeout):
+        calls.append(
+            {
+                "url": request.full_url,
+                "method": request.get_method(),
+                "body": request.data.decode("utf-8") if request.data else "",
+            }
+        )
+        if request.get_method() == "GET":
+            return FakeResponse(json.dumps([{"id": 99, "body": f"{AGENTREVIEW_COMMENT_MARKER}\nold"}]))
+        return FakeResponse(json.dumps({"html_url": "https://github.com/octo/example/pull/123#issuecomment-99"}))
+
+    comment_url = upsert_pull_request_comment(
+        repo="octo/example",
+        pr_number=123,
+        body="updated report",
+        token="secret-token",
+        opener=fake_opener,
+    )
+
+    assert comment_url.endswith("#issuecomment-99")
+    assert [call["method"] for call in calls] == ["GET", "PATCH"]
+    assert calls[1]["url"] == "https://api.github.com/repos/octo/example/issues/comments/99"
+    assert "updated report" in json.loads(calls[1]["body"])["body"]
+
+
 def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Path) -> None:
     runner = CliRunner()
     output_path = tmp_path / "pr-report.md"
@@ -122,6 +191,41 @@ def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Pat
     assert output_path.exists()
 
 
+def test_scan_pr_can_publish_comment(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    output_path = tmp_path / "pr-report.md"
+    calls = []
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+    monkeypatch.setattr("agentreview.cli.fetch_pull_request_diff", lambda **_kwargs: SAMPLE_DIFF)
+
+    def fake_comment(**kwargs):
+        calls.append(kwargs)
+        return "https://github.com/octo/example/pull/123#issuecomment-1"
+
+    monkeypatch.setattr("agentreview.cli.upsert_pull_request_comment", fake_comment)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-pr",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--output",
+            str(output_path),
+            "--comment",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "GitHub comment: https://github.com/octo/example/pull/123#issuecomment-1" in result.output
+    assert calls[0]["repo"] == "octo/example"
+    assert calls[0]["pr_number"] == 123
+    assert calls[0]["body"].startswith("# AgentReviewOps Report")
+    assert "secret-token" not in result.output
+
+
 def test_scan_pr_missing_token_exits_clearly(monkeypatch, tmp_path: Path) -> None:
     runner = CliRunner()
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -141,3 +245,36 @@ def test_scan_pr_missing_token_exits_clearly(monkeypatch, tmp_path: Path) -> Non
 
     assert result.exit_code == 2
     assert "GITHUB_TOKEN is required" in result.output
+
+
+def test_comment_pr_posts_existing_report_without_printing_token(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    report_path = tmp_path / "agentreview-report.md"
+    report_path.write_text("# AgentReviewOps Report\n", encoding="utf-8")
+    calls = []
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+
+    def fake_comment(**kwargs):
+        calls.append(kwargs)
+        return "https://github.com/octo/example/pull/123#issuecomment-1"
+
+    monkeypatch.setattr("agentreview.cli.upsert_pull_request_comment", fake_comment)
+
+    result = runner.invoke(
+        app,
+        [
+            "comment-pr",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--report-file",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "GitHub PR: octo/example#123" in result.output
+    assert "GitHub comment: https://github.com/octo/example/pull/123#issuecomment-1" in result.output
+    assert calls[0]["body"] == "# AgentReviewOps Report\n"
+    assert "secret-token" not in result.output

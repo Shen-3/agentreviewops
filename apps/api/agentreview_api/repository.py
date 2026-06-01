@@ -45,6 +45,45 @@ def create_user(
     return record
 
 
+def list_users(session: Session, *, organization_id: str) -> list[UserRecord]:
+    statement = (
+        select(UserRecord)
+        .where(UserRecord.organization_id == organization_id)
+        .order_by(UserRecord.email)
+    )
+    return list(session.scalars(statement).all())
+
+
+def get_user(session: Session, *, organization_id: str, user_id: str) -> UserRecord | None:
+    statement = select(UserRecord).where(
+        UserRecord.organization_id == organization_id,
+        UserRecord.id == user_id,
+    )
+    return session.scalar(statement)
+
+
+def get_user_by_email(session: Session, *, email: str) -> UserRecord | None:
+    statement = select(UserRecord).where(UserRecord.email == email)
+    return session.scalar(statement)
+
+
+def count_admin_users(session: Session, *, organization_id: str) -> int:
+    count = session.scalar(
+        select(func.count())
+        .select_from(UserRecord)
+        .where(
+            UserRecord.organization_id == organization_id,
+            UserRecord.role == "admin",
+        )
+    )
+    return int(count or 0)
+
+
+def delete_user(session: Session, record: UserRecord) -> None:
+    session.delete(record)
+    session.commit()
+
+
 def create_repository(
     session: Session,
     *,
@@ -69,6 +108,46 @@ def create_repository(
     return record
 
 
+def get_repository_by_identity(
+    session: Session,
+    *,
+    organization_id: str,
+    provider: str,
+    owner: str,
+    name: str,
+) -> RepositoryRecord | None:
+    statement = select(RepositoryRecord).where(
+        RepositoryRecord.organization_id == organization_id,
+        RepositoryRecord.provider == provider,
+        RepositoryRecord.owner == owner,
+        RepositoryRecord.name == name,
+    )
+    return session.scalar(statement)
+
+
+def get_repository(session: Session, *, organization_id: str, repository_id: str) -> RepositoryRecord | None:
+    statement = (
+        select(RepositoryRecord)
+        .where(
+            RepositoryRecord.organization_id == organization_id,
+            RepositoryRecord.id == repository_id,
+        )
+        .options(selectinload(RepositoryRecord.memberships).selectinload(RepositoryMembershipRecord.user))
+        .execution_options(populate_existing=True)
+    )
+    return session.scalar(statement)
+
+
+def list_repositories(session: Session, *, organization_id: str) -> list[RepositoryRecord]:
+    statement = (
+        select(RepositoryRecord)
+        .where(RepositoryRecord.organization_id == organization_id)
+        .options(selectinload(RepositoryRecord.memberships).selectinload(RepositoryMembershipRecord.user))
+        .order_by(RepositoryRecord.provider, RepositoryRecord.owner, RepositoryRecord.name)
+    )
+    return list(session.scalars(statement).all())
+
+
 def create_repository_membership(
     session: Session,
     *,
@@ -83,17 +162,37 @@ def create_repository_membership(
     return record
 
 
+def get_repository_membership(
+    session: Session,
+    *,
+    repository_id: str,
+    user_id: str,
+) -> RepositoryMembershipRecord | None:
+    statement = select(RepositoryMembershipRecord).where(
+        RepositoryMembershipRecord.repository_id == repository_id,
+        RepositoryMembershipRecord.user_id == user_id,
+    )
+    return session.scalar(statement)
+
+
+def delete_repository_membership(session: Session, record: RepositoryMembershipRecord) -> None:
+    session.delete(record)
+    session.commit()
+
+
 def create_api_key(
     session: Session,
     *,
     organization_id: str,
     name: str,
+    role: str = "admin",
     secret: str | None = None,
 ) -> tuple[ApiKeyRecord, str]:
     api_key = secret or generate_api_key()
     record = ApiKeyRecord(
         organization_id=organization_id,
         name=name,
+        role=role,
         key_prefix=key_prefix(api_key),
         key_hash=hash_api_key(api_key),
     )
@@ -198,9 +297,11 @@ def create_policy(
     config: AgentReviewConfig,
     enabled: bool = True,
     scope: str = "organization",
+    repository_id: str | None = None,
 ) -> PolicyRecord:
     record = PolicyRecord(
         organization_id=organization_id,
+        repository_id=repository_id,
         name=name,
         scope=scope,
         config_json=config.model_dump(mode="json"),
@@ -216,6 +317,7 @@ def list_policies(session: Session, *, organization_id: str) -> list[PolicyRecor
     statement = (
         select(PolicyRecord)
         .where(PolicyRecord.organization_id == organization_id)
+        .options(selectinload(PolicyRecord.repository))
         .order_by(PolicyRecord.created_at.desc())
     )
     return list(session.scalars(statement).all())
@@ -224,7 +326,33 @@ def list_policies(session: Session, *, organization_id: str) -> list[PolicyRecor
 def get_enabled_policy(session: Session, *, organization_id: str) -> PolicyRecord | None:
     statement = (
         select(PolicyRecord)
-        .where(PolicyRecord.organization_id == organization_id, PolicyRecord.enabled.is_(True))
+        .where(
+            PolicyRecord.organization_id == organization_id,
+            PolicyRecord.scope == "organization",
+            PolicyRecord.repository_id.is_(None),
+            PolicyRecord.enabled.is_(True),
+        )
+        .order_by(PolicyRecord.created_at.desc())
+        .limit(1)
+    )
+    return session.scalar(statement)
+
+
+def get_enabled_repository_policy(
+    session: Session,
+    *,
+    organization_id: str,
+    repository_id: str,
+) -> PolicyRecord | None:
+    statement = (
+        select(PolicyRecord)
+        .where(
+            PolicyRecord.organization_id == organization_id,
+            PolicyRecord.repository_id == repository_id,
+            PolicyRecord.scope == "repository",
+            PolicyRecord.enabled.is_(True),
+        )
+        .options(selectinload(PolicyRecord.repository))
         .order_by(PolicyRecord.created_at.desc())
         .limit(1)
     )

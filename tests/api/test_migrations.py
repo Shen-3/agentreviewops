@@ -34,6 +34,12 @@ def test_alembic_upgrade_creates_analysis_tables(tmp_path: Path, monkeypatch) ->
     analysis_columns = {column["name"] for column in inspector.get_columns("analysis_runs")}
     assert "organization_id" in analysis_columns
 
+    api_key_columns = {column["name"] for column in inspector.get_columns("api_keys")}
+    assert "role" in api_key_columns
+
+    api_key_indexes = {index["name"] for index in inspector.get_indexes("api_keys")}
+    assert "ix_api_keys_org_role" in api_key_indexes
+
     audit_columns = {column["name"] for column in inspector.get_columns("audit_events")}
     assert {
         "organization_id",
@@ -51,3 +57,12 @@ def test_alembic_upgrade_creates_analysis_tables(tmp_path: Path, monkeypatch) ->
         "ix_audit_events_org_actor",
         "ix_audit_events_org_target",
     } <= audit_indexes
+
+    policy_columns = {column["name"] for column in inspector.get_columns("policies")}
+    assert "repository_id" in policy_columns
+
+    policy_indexes = {index["name"] for index in inspector.get_indexes("policies")}
+    assert {
+        "ix_policies_repository_id",
+        "ix_policies_org_scope_repo_enabled",
+    } <= policy_indexes

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from typing import Literal
@@ -13,31 +14,50 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from agentreview.gitdiff import parse_unified_diff
+from agentreview.ai import AIProviderConfigError, AIProviderRequestError
+from agentreview.analysis import analyze_diff_text
 from agentreview.models import AgentReviewConfig, DiffFile, RiskFinding, RiskLevel
-from agentreview.report import generate_markdown_report
-from agentreview.risk import analyze_risk
+from agentreview.plugins import PluginError
 from agentreview_api.audit import (
     AUDIT_ACTION_ANALYSIS_CREATED,
     AUDIT_ACTION_API_KEY_CREATED,
     AUDIT_ACTION_API_KEY_REVOKED,
     AUDIT_ACTION_POLICY_CREATED,
+    AUDIT_ACTION_REPOSITORY_CREATED,
+    AUDIT_ACTION_REPOSITORY_MEMBERSHIP_CREATED,
+    AUDIT_ACTION_REPOSITORY_MEMBERSHIP_DELETED,
     AUDIT_ACTION_RETENTION_PURGED,
+    AUDIT_ACTION_USER_CREATED,
+    AUDIT_ACTION_USER_DELETED,
 )
-from agentreview_api.auth import AuthContext, require_api_key
-from agentreview_api.db import get_session
+from agentreview_api.auth import AuthContext, require_admin_api_key, require_analysis_api_key, require_api_key
+from agentreview_api.db import PolicyRecord, RepositoryRecord, get_session
 from agentreview_api.repository import (
     create_analysis_run,
     create_api_key,
     create_audit_event,
     create_policy,
+    create_repository,
+    create_repository_membership,
+    create_user,
     count_retention_candidates,
+    count_admin_users,
+    delete_repository_membership,
+    delete_user,
     get_analysis_run,
     get_enabled_policy,
+    get_enabled_repository_policy,
+    get_repository,
+    get_repository_by_identity,
+    get_repository_membership,
+    get_user,
+    get_user_by_email,
     list_analysis_runs,
     list_api_keys,
     list_audit_events,
     list_policies,
+    list_repositories,
+    list_users,
     purge_retention_records,
     revoke_api_key,
     to_diff_files,
@@ -61,7 +81,7 @@ app.add_middleware(
         "http://localhost:4173",
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -123,15 +143,64 @@ class AuthMeResponse(BaseModel):
     organization_id: str
     api_key_id: str
     api_key_name: str
+    api_key_role: str
 
 
 class ApiKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255, description="Human-readable API key name.")
+    role: str = Field(default="admin", pattern="^(admin|ci|read_only)$")
+
+
+class RepositoryCreateRequest(BaseModel):
+    provider: str = Field(default="github", min_length=1, max_length=50, description="Source control provider.")
+    owner: str = Field(min_length=1, max_length=255, description="Repository owner or namespace.")
+    name: str = Field(min_length=1, max_length=255, description="Repository name.")
+    default_branch: str | None = Field(default=None, max_length=255)
+    visibility: str | None = Field(default=None, max_length=50)
+
+
+class RepositoryReviewerResponse(BaseModel):
+    user_id: str
+    email: str
+    name: str | None
+    role: str
+
+
+class RepositoryResponse(BaseModel):
+    repository_id: str
+    provider: str
+    owner: str
+    name: str
+    full_name: str
+    default_branch: str | None
+    visibility: str | None
+    reviewers: list[RepositoryReviewerResponse]
+    created_at: datetime
+
+
+class UserCreateRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255, description="Organization user email.")
+    name: str | None = Field(default=None, max_length=255)
+    role: str = Field(default="reviewer", pattern="^(admin|reviewer)$")
+
+
+class UserResponse(BaseModel):
+    user_id: str
+    email: str
+    name: str | None
+    role: str
+    created_at: datetime
+
+
+class RepositoryMembershipCreateRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    role: str = Field(default="reviewer", pattern="^(owner|maintainer|reviewer)$")
 
 
 class ApiKeyResponse(BaseModel):
     api_key_id: str
     name: str
+    role: str
     key_prefix: str
     created_at: datetime
     revoked_at: datetime | None
@@ -146,13 +215,16 @@ class PolicyCreateRequest(BaseModel):
     name: str = Field(min_length=1, description="Human-readable policy name.")
     config: AgentReviewConfig
     enabled: bool = True
-    scope: str = Field(default="organization", pattern="^organization$")
+    scope: str = Field(default="organization", pattern="^(organization|repository)$")
+    repository_id: str | None = Field(default=None, description="Required when scope is repository.")
 
 
 class PolicyResponse(BaseModel):
     policy_id: str
     name: str
     scope: str
+    repository_id: str | None
+    repository_full_name: str | None
     enabled: bool
     config: AgentReviewConfig
     created_at: datetime
@@ -188,6 +260,14 @@ class RetentionPurgeResponse(BaseModel):
     audit_event_count: int
 
 
+@dataclass(frozen=True)
+class PolicySelection:
+    config: AgentReviewConfig
+    source: str
+    policy: PolicyRecord | None
+    repository: RepositoryRecord | None
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service="agentreview-api")
@@ -199,7 +279,223 @@ def auth_me(auth: AuthContext = Depends(require_api_key)) -> AuthMeResponse:
         organization_id=auth.organization_id,
         api_key_id=auth.api_key_id,
         api_key_name=auth.api_key_name,
+        api_key_role=auth.api_key_role,
     )
+
+
+@app.get("/api/repositories", response_model=list[RepositoryResponse])
+def get_repositories(auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)) -> list[RepositoryResponse]:
+    return [_repository_response(record) for record in list_repositories(session, organization_id=auth.organization_id)]
+
+
+@app.post("/api/repositories", response_model=RepositoryResponse)
+def create_org_repository(
+    request: RepositoryCreateRequest,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> RepositoryResponse:
+    provider = request.provider.strip().lower()
+    owner = request.owner.strip()
+    name = request.name.strip()
+    default_branch = request.default_branch.strip() if request.default_branch and request.default_branch.strip() else None
+    visibility = request.visibility.strip().lower() if request.visibility and request.visibility.strip() else None
+    if not provider or not owner or not name:
+        raise HTTPException(status_code=422, detail="Repository provider, owner, and name are required")
+
+    existing = get_repository_by_identity(
+        session,
+        organization_id=auth.organization_id,
+        provider=provider,
+        owner=owner,
+        name=name,
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Repository already exists")
+
+    record = create_repository(
+        session,
+        organization_id=auth.organization_id,
+        provider=provider,
+        owner=owner,
+        name=name,
+        default_branch=default_branch,
+        visibility=visibility,
+    )
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_REPOSITORY_CREATED,
+        target_type="repository",
+        target_id=record.id,
+        metadata={
+            "provider": record.provider,
+            "owner": record.owner,
+            "name": record.name,
+            "default_branch": record.default_branch,
+            "visibility": record.visibility,
+        },
+    )
+    return _repository_response(record)
+
+
+@app.post("/api/repositories/{repository_id}/memberships", response_model=RepositoryResponse)
+def assign_repository_membership(
+    repository_id: str,
+    request: RepositoryMembershipCreateRequest,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> RepositoryResponse:
+    repository = get_repository(session, organization_id=auth.organization_id, repository_id=repository_id)
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    user = get_user(session, organization_id=auth.organization_id, user_id=request.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    existing = get_repository_membership(session, repository_id=repository.id, user_id=user.id)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="User is already assigned to this repository")
+
+    membership = create_repository_membership(
+        session,
+        repository_id=repository.id,
+        user_id=user.id,
+        role=request.role,
+    )
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_REPOSITORY_MEMBERSHIP_CREATED,
+        target_type="repository",
+        target_id=repository.id,
+        metadata={
+            "repository": f"{repository.owner}/{repository.name}",
+            "user_id": user.id,
+            "membership_id": membership.id,
+            "membership_role": membership.role,
+        },
+    )
+    refreshed = get_repository(session, organization_id=auth.organization_id, repository_id=repository.id)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return _repository_response(refreshed)
+
+
+@app.delete("/api/repositories/{repository_id}/memberships/{user_id}", response_model=RepositoryResponse)
+def remove_repository_membership(
+    repository_id: str,
+    user_id: str,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> RepositoryResponse:
+    repository = get_repository(session, organization_id=auth.organization_id, repository_id=repository_id)
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    membership = get_repository_membership(session, repository_id=repository.id, user_id=user_id)
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Repository membership not found")
+
+    membership_role = membership.role
+    membership_id = membership.id
+    delete_repository_membership(session, membership)
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_REPOSITORY_MEMBERSHIP_DELETED,
+        target_type="repository",
+        target_id=repository.id,
+        metadata={
+            "repository": f"{repository.owner}/{repository.name}",
+            "user_id": user_id,
+            "membership_id": membership_id,
+            "membership_role": membership_role,
+        },
+    )
+    refreshed = get_repository(session, organization_id=auth.organization_id, repository_id=repository.id)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return _repository_response(refreshed)
+
+
+@app.get("/api/users", response_model=list[UserResponse])
+def get_users(auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)) -> list[UserResponse]:
+    return [_user_response(record) for record in list_users(session, organization_id=auth.organization_id)]
+
+
+@app.post("/api/users", response_model=UserResponse)
+def create_org_user(
+    request: UserCreateRequest,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> UserResponse:
+    email = request.email.strip().lower()
+    name = request.name.strip() if request.name and request.name.strip() else None
+    if not email or "@" not in email:
+        raise HTTPException(status_code=422, detail="A valid user email is required")
+
+    existing = get_user_by_email(session, email=email)
+    if existing is not None:
+        if existing.organization_id == auth.organization_id:
+            raise HTTPException(status_code=409, detail="User already exists")
+        raise HTTPException(status_code=409, detail="User email belongs to another organization")
+
+    record = create_user(
+        session,
+        organization_id=auth.organization_id,
+        email=email,
+        name=name,
+        role=request.role,
+    )
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_USER_CREATED,
+        target_type="user",
+        target_id=record.id,
+        metadata={
+            "user_role": record.role,
+        },
+    )
+    return _user_response(record)
+
+
+@app.delete("/api/users/{user_id}", status_code=204)
+def delete_org_user(
+    user_id: str,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> Response:
+    record = get_user(session, organization_id=auth.organization_id, user_id=user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if record.role == "admin" and count_admin_users(session, organization_id=auth.organization_id) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the last organization admin")
+
+    deleted_role = record.role
+    delete_user(session, record)
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_USER_DELETED,
+        target_type="user",
+        target_id=user_id,
+        metadata={
+            "user_role": deleted_role,
+        },
+    )
+    return Response(status_code=204)
 
 
 @app.get("/api/api-keys", response_model=list[ApiKeyResponse])
@@ -210,7 +506,7 @@ def get_api_keys(auth: AuthContext = Depends(require_api_key), session: Session 
 @app.post("/api/api-keys", response_model=ApiKeyCreateResponse)
 def create_org_api_key(
     request: ApiKeyCreateRequest,
-    auth: AuthContext = Depends(require_api_key),
+    auth: AuthContext = Depends(require_admin_api_key),
     session: Session = Depends(get_session),
 ) -> ApiKeyCreateResponse:
     normalized_name = request.name.strip()
@@ -221,6 +517,7 @@ def create_org_api_key(
         session,
         organization_id=auth.organization_id,
         name=normalized_name,
+        role=request.role,
     )
     create_audit_event(
         session,
@@ -232,6 +529,7 @@ def create_org_api_key(
         target_id=record.id,
         metadata={
             "api_key_name": record.name,
+            "api_key_role": record.role,
             "source": "api",
         },
     )
@@ -244,7 +542,7 @@ def create_org_api_key(
 @app.post("/api/api-keys/{api_key_id}/revoke", response_model=ApiKeyResponse)
 def revoke_org_api_key(
     api_key_id: str,
-    auth: AuthContext = Depends(require_api_key),
+    auth: AuthContext = Depends(require_admin_api_key),
     session: Session = Depends(get_session),
 ) -> ApiKeyResponse:
     if api_key_id == auth.api_key_id:
@@ -363,7 +661,7 @@ def export_audit_events(
 @app.post("/api/retention/purge", response_model=RetentionPurgeResponse)
 def purge_retention(
     request: RetentionPurgeRequest,
-    auth: AuthContext = Depends(require_api_key),
+    auth: AuthContext = Depends(require_admin_api_key),
     session: Session = Depends(get_session),
 ) -> RetentionPurgeResponse:
     if not request.include_analysis_runs and not request.include_audit_events:
@@ -431,9 +729,19 @@ def get_policies(auth: AuthContext = Depends(require_api_key), session: Session 
 @app.post("/api/policies", response_model=PolicyResponse)
 def save_policy(
     request: PolicyCreateRequest,
-    auth: AuthContext = Depends(require_api_key),
+    auth: AuthContext = Depends(require_admin_api_key),
     session: Session = Depends(get_session),
 ) -> PolicyResponse:
+    repository = None
+    if request.scope == "repository":
+        if not request.repository_id:
+            raise HTTPException(status_code=422, detail="repository_id is required for repository-scoped policies")
+        repository = get_repository(session, organization_id=auth.organization_id, repository_id=request.repository_id)
+        if repository is None:
+            raise HTTPException(status_code=404, detail="Repository not found")
+    elif request.repository_id is not None:
+        raise HTTPException(status_code=422, detail="repository_id is only valid for repository-scoped policies")
+
     record = create_policy(
         session,
         organization_id=auth.organization_id,
@@ -441,6 +749,7 @@ def save_policy(
         config=request.config,
         enabled=request.enabled,
         scope=request.scope,
+        repository_id=repository.id if repository is not None else None,
     )
     create_audit_event(
         session,
@@ -450,11 +759,14 @@ def save_policy(
         action=AUDIT_ACTION_POLICY_CREATED,
         target_type="policy",
         target_id=record.id,
-        metadata={
-            "policy_name": record.name,
-            "enabled": record.enabled,
-            "scope": record.scope,
-        },
+        metadata=_compact_metadata(
+            {
+                "policy_name": record.name,
+                "enabled": record.enabled,
+                "scope": record.scope,
+                "repository": f"{repository.owner}/{repository.name}" if repository is not None else None,
+            }
+        ),
     )
     return _policy_response(record)
 
@@ -462,18 +774,25 @@ def save_policy(
 @app.post("/api/analyze/diff", response_model=AnalyzeDiffResponse)
 def analyze_diff(
     request: AnalyzeDiffRequest,
-    auth: AuthContext = Depends(require_api_key),
+    auth: AuthContext = Depends(require_analysis_api_key),
     session: Session = Depends(get_session),
 ) -> AnalyzeDiffResponse:
-    config = _resolve_analysis_config(request.config, auth, session)
-    changed_files = parse_unified_diff(request.diff, config=config)
-    analysis = analyze_risk(changed_files, config=config)
-    markdown = generate_markdown_report(analysis, changed_files, config=config)
+    policy_selection = _resolve_analysis_config(request.repository, request.config, auth, session)
+    config = policy_selection.config
+    try:
+        result = analyze_diff_text(request.diff, config=config)
+    except PluginError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AIProviderConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AIProviderRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     record = create_analysis_run(
         session,
-        changed_files=changed_files,
-        analysis=analysis,
-        markdown=markdown,
+        changed_files=result.changed_files,
+        analysis=result.analysis,
+        markdown=result.markdown,
         config=config,
         source="api",
         organization_id=auth.organization_id,
@@ -497,22 +816,29 @@ def analyze_diff(
             "pull_request_number": request.pull_request_number,
             "agent_name": request.agent_name,
             "branch": request.branch,
-            "risk_level": analysis.risk_level,
-            "risk_score": analysis.risk_score,
-            "changed_file_count": len(changed_files),
-            "finding_count": len(analysis.findings),
-            "config_source": "organization_policy" if get_enabled_policy(session, organization_id=auth.organization_id) is not None else "request_or_default",
+            "risk_level": result.analysis.risk_level,
+            "risk_score": result.analysis.risk_score,
+            "changed_file_count": len(result.changed_files),
+            "finding_count": len(result.analysis.findings),
+            "config_source": policy_selection.source,
+            "policy_id": policy_selection.policy.id if policy_selection.policy is not None else None,
+            "policy_name": policy_selection.policy.name if policy_selection.policy is not None else None,
+            "repository_id": policy_selection.repository.id if policy_selection.repository is not None else None,
+            "routed_reviewer_count": len(policy_selection.repository.memberships) if policy_selection.repository is not None else 0,
+            "routed_reviewer_roles": sorted({membership.role for membership in policy_selection.repository.memberships})
+            if policy_selection.repository is not None
+            else [],
         },
     )
 
     return AnalyzeDiffResponse(
         analysis_run_id=record.id,
         created_at=record.created_at,
-        risk_score=analysis.risk_score,
-        risk_level=analysis.risk_level,
-        findings=analysis.findings,
-        changed_files=changed_files,
-        markdown=markdown,
+        risk_score=result.analysis.risk_score,
+        risk_level=result.analysis.risk_level,
+        findings=result.analysis.findings,
+        changed_files=result.changed_files,
+        markdown=result.markdown,
     )
 
 
@@ -577,11 +903,81 @@ def _get_analysis_report_response(analysis_run_id: str, auth: AuthContext, sessi
     )
 
 
-def _resolve_analysis_config(request_config: AgentReviewConfig | None, auth: AuthContext, session: Session) -> AgentReviewConfig:
-    policy = get_enabled_policy(session, organization_id=auth.organization_id)
-    if policy is not None:
-        return AgentReviewConfig.model_validate(policy.config_json)
-    return request_config or AgentReviewConfig()
+def _resolve_analysis_config(
+    repository_name: str | None,
+    request_config: AgentReviewConfig | None,
+    auth: AuthContext,
+    session: Session,
+) -> PolicySelection:
+    repository = _find_repository_for_analysis(repository_name, auth, session)
+    if repository is not None:
+        repository_policy = get_enabled_repository_policy(
+            session,
+            organization_id=auth.organization_id,
+            repository_id=repository.id,
+        )
+        if repository_policy is not None:
+            return PolicySelection(
+                config=AgentReviewConfig.model_validate(repository_policy.config_json),
+                source="repository_policy",
+                policy=repository_policy,
+                repository=repository,
+            )
+
+    organization_policy = get_enabled_policy(session, organization_id=auth.organization_id)
+    if organization_policy is not None:
+        return PolicySelection(
+            config=AgentReviewConfig.model_validate(organization_policy.config_json),
+            source="organization_policy",
+            policy=organization_policy,
+            repository=repository,
+        )
+
+    if request_config is not None:
+        return PolicySelection(config=request_config, source="request_config", policy=None, repository=repository)
+    return PolicySelection(config=AgentReviewConfig(), source="default", policy=None, repository=repository)
+
+
+def _find_repository_for_analysis(repository_name: str | None, auth: AuthContext, session: Session) -> RepositoryRecord | None:
+    identity = _parse_repository_identity(repository_name)
+    if identity is None:
+        return None
+    provider, owner, name = identity
+    return get_repository_by_identity(
+        session,
+        organization_id=auth.organization_id,
+        provider=provider,
+        owner=owner,
+        name=name,
+    )
+
+
+def _parse_repository_identity(repository_name: str | None) -> tuple[str, str, str] | None:
+    if repository_name is None:
+        return None
+    normalized = repository_name.strip().rstrip("/")
+    if not normalized:
+        return None
+    if normalized.startswith("https://github.com/"):
+        normalized = normalized.removeprefix("https://github.com/")
+    elif normalized.startswith("git@github.com:"):
+        normalized = normalized.removeprefix("git@github.com:")
+    elif "://" in normalized:
+        return None
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+
+    provider = "github"
+    if ":" in normalized:
+        provider_candidate, repository_path = normalized.split(":", 1)
+        if provider_candidate and "/" in repository_path:
+            provider = provider_candidate.strip().lower()
+            normalized = repository_path
+
+    owner_name = normalized.split("/")
+    if len(owner_name) != 2 or not owner_name[0].strip() or not owner_name[1].strip():
+        return None
+    return provider, owner_name[0].strip(), owner_name[1].strip()
 
 
 def _policy_response(record) -> PolicyResponse:
@@ -589,6 +985,8 @@ def _policy_response(record) -> PolicyResponse:
         policy_id=record.id,
         name=record.name,
         scope=record.scope,
+        repository_id=record.repository_id,
+        repository_full_name=f"{record.repository.owner}/{record.repository.name}" if record.repository is not None else None,
         enabled=record.enabled,
         config=AgentReviewConfig.model_validate(record.config_json),
         created_at=record.created_at,
@@ -600,10 +998,43 @@ def _api_key_response(record, *, auth: AuthContext) -> ApiKeyResponse:
     return ApiKeyResponse(
         api_key_id=record.id,
         name=record.name,
+        role=record.role,
         key_prefix=record.key_prefix,
         created_at=record.created_at,
         revoked_at=record.revoked_at,
         is_current=record.id == auth.api_key_id,
+    )
+
+
+def _user_response(record) -> UserResponse:
+    return UserResponse(
+        user_id=record.id,
+        email=record.email,
+        name=record.name,
+        role=record.role,
+        created_at=record.created_at,
+    )
+
+
+def _repository_response(record) -> RepositoryResponse:
+    return RepositoryResponse(
+        repository_id=record.id,
+        provider=record.provider,
+        owner=record.owner,
+        name=record.name,
+        full_name=f"{record.owner}/{record.name}",
+        default_branch=record.default_branch,
+        visibility=record.visibility,
+        reviewers=[
+            RepositoryReviewerResponse(
+                user_id=membership.user.id,
+                email=membership.user.email,
+                name=membership.user.name,
+                role=membership.role,
+            )
+            for membership in sorted(record.memberships, key=lambda item: (item.role, item.user.email))
+        ],
+        created_at=record.created_at,
     )
 
 
@@ -618,3 +1049,7 @@ def _audit_event_response(record) -> AuditEventResponse:
         target_id=record.target_id,
         metadata=record.metadata_json,
     )
+
+
+def _compact_metadata(metadata: dict) -> dict:
+    return {key: value for key, value in metadata.items() if value is not None}

@@ -82,6 +82,7 @@ def test_auth_me_returns_api_key_context(client: TestClient) -> None:
     assert body["organization_id"]
     assert body["api_key_id"]
     assert body["api_key_name"] == "CI"
+    assert body["api_key_role"] == "admin"
 
 
 def test_analysis_endpoints_reject_anonymous_requests(client: TestClient) -> None:
@@ -112,6 +113,162 @@ def test_api_key_management_rejects_anonymous_requests(client: TestClient) -> No
     assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
 
 
+def test_user_management_rejects_anonymous_requests(client: TestClient) -> None:
+    client.headers.clear()
+
+    response = client.get("/api/users")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
+
+
+def test_repository_onboarding_lists_creates_audits_and_blocks_duplicates(client: TestClient) -> None:
+    list_response = client.get("/api/repositories")
+
+    assert list_response.status_code == 200
+    repositories = list_response.json()
+    assert len(repositories) == 1
+    assert repositories[0]["full_name"] == "platform/checkout-api"
+    assert repositories[0]["provider"] == "github"
+    assert repositories[0]["reviewers"] == [
+        {
+            "user_id": repositories[0]["reviewers"][0]["user_id"],
+            "email": "reviewer@example.com",
+            "name": "Reviewer",
+            "role": "maintainer",
+        }
+    ]
+
+    create_response = client.post(
+        "/api/repositories",
+        json={
+            "provider": "GitHub",
+            "owner": "platform",
+            "name": "billing-api",
+            "default_branch": "main",
+            "visibility": "Private",
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["repository_id"]
+    assert created["provider"] == "github"
+    assert created["full_name"] == "platform/billing-api"
+    assert created["default_branch"] == "main"
+    assert created["visibility"] == "private"
+
+    duplicate_response = client.post(
+        "/api/repositories",
+        json={
+            "provider": "github",
+            "owner": "platform",
+            "name": "billing-api",
+        },
+    )
+    assert duplicate_response.status_code == 409
+
+    audit_response = client.get("/api/audit-events", params={"action": "repository.created"})
+    assert audit_response.status_code == 200
+    audit_event = audit_response.json()[0]
+    assert audit_event["target_id"] == created["repository_id"]
+    assert audit_event["metadata"] == {
+        "provider": "github",
+        "owner": "platform",
+        "name": "billing-api",
+        "default_branch": "main",
+        "visibility": "private",
+    }
+
+
+def test_user_management_and_repository_membership_assignment(client: TestClient) -> None:
+    list_response = client.get("/api/users")
+
+    assert list_response.status_code == 200
+    users = list_response.json()
+    assert len(users) == 1
+    assert users[0]["email"] == "reviewer@example.com"
+    assert users[0]["role"] == "admin"
+
+    create_user_response = client.post(
+        "/api/users",
+        json={
+            "email": "Payments.Owner@Example.COM",
+            "name": "Payments Owner",
+            "role": "reviewer",
+        },
+    )
+
+    assert create_user_response.status_code == 200
+    created_user = create_user_response.json()
+    assert created_user["user_id"]
+    assert created_user["email"] == "payments.owner@example.com"
+    assert created_user["name"] == "Payments Owner"
+    assert created_user["role"] == "reviewer"
+
+    duplicate_user_response = client.post(
+        "/api/users",
+        json={
+            "email": "payments.owner@example.com",
+            "role": "reviewer",
+        },
+    )
+    assert duplicate_user_response.status_code == 409
+
+    repository = client.get("/api/repositories").json()[0]
+    assign_response = client.post(
+        f"/api/repositories/{repository['repository_id']}/memberships",
+        json={
+            "user_id": created_user["user_id"],
+            "role": "owner",
+        },
+    )
+
+    assert assign_response.status_code == 200
+    updated_repository = assign_response.json()
+    reviewer_emails = {reviewer["email"]: reviewer["role"] for reviewer in updated_repository["reviewers"]}
+    assert reviewer_emails["reviewer@example.com"] == "maintainer"
+    assert reviewer_emails["payments.owner@example.com"] == "owner"
+
+    duplicate_membership_response = client.post(
+        f"/api/repositories/{repository['repository_id']}/memberships",
+        json={
+            "user_id": created_user["user_id"],
+            "role": "owner",
+        },
+    )
+    assert duplicate_membership_response.status_code == 409
+
+    remove_membership_response = client.delete(
+        f"/api/repositories/{repository['repository_id']}/memberships/{created_user['user_id']}",
+    )
+    assert remove_membership_response.status_code == 200
+    reviewer_emails = {reviewer["email"]: reviewer["role"] for reviewer in remove_membership_response.json()["reviewers"]}
+    assert "payments.owner@example.com" not in reviewer_emails
+
+    delete_user_response = client.delete(f"/api/users/{created_user['user_id']}")
+    assert delete_user_response.status_code == 204
+
+    list_after_delete_response = client.get("/api/users")
+    assert list_after_delete_response.status_code == 200
+    assert [user["email"] for user in list_after_delete_response.json()] == ["reviewer@example.com"]
+
+    delete_last_admin_response = client.delete(f"/api/users/{users[0]['user_id']}")
+    assert delete_last_admin_response.status_code == 400
+    assert delete_last_admin_response.json() == {"detail": "Cannot delete the last organization admin"}
+
+    audit_response = client.get("/api/audit-events")
+    assert audit_response.status_code == 200
+    actions = [event["action"] for event in audit_response.json()[:4]]
+    assert actions == ["user.deleted", "repository_membership.deleted", "repository_membership.created", "user.created"]
+    membership_event = audit_response.json()[2]
+    assert membership_event["target_id"] == repository["repository_id"]
+    assert membership_event["metadata"]["repository"] == "platform/checkout-api"
+    assert membership_event["metadata"]["user_id"] == created_user["user_id"]
+    assert membership_event["metadata"]["membership_role"] == "owner"
+    assert "payments.owner@example.com" not in json.dumps(membership_event)
+
+
 def test_api_key_management_lists_creates_and_revokes_keys(client: TestClient) -> None:
     list_response = client.get("/api/api-keys")
 
@@ -119,6 +276,7 @@ def test_api_key_management_lists_creates_and_revokes_keys(client: TestClient) -
     initial_keys = list_response.json()
     assert len(initial_keys) == 1
     assert initial_keys[0]["name"] == "CI"
+    assert initial_keys[0]["role"] == "admin"
     assert initial_keys[0]["is_current"] is True
     assert initial_keys[0]["revoked_at"] is None
     assert "api_key" not in initial_keys[0]
@@ -130,6 +288,7 @@ def test_api_key_management_lists_creates_and_revokes_keys(client: TestClient) -
     created = create_response.json()
     assert created["api_key_id"]
     assert created["name"] == "Dashboard operator"
+    assert created["role"] == "admin"
     assert created["api_key"].startswith("arok_")
     assert created["key_prefix"] == key_prefix(created["api_key"])
     assert created["is_current"] is False
@@ -141,6 +300,7 @@ def test_api_key_management_lists_creates_and_revokes_keys(client: TestClient) -
     assert audit_event["target_id"] == created["api_key_id"]
     assert audit_event["metadata"] == {
         "api_key_name": "Dashboard operator",
+        "api_key_role": "admin",
         "source": "api",
     }
     assert created["api_key"] not in str(audit_event)
@@ -157,6 +317,7 @@ def test_api_key_management_lists_creates_and_revokes_keys(client: TestClient) -
     assert revoke_response.status_code == 200
     revoked = revoke_response.json()
     assert revoked["api_key_id"] == created["api_key_id"]
+    assert revoked["role"] == "admin"
     assert revoked["revoked_at"]
 
     auth_with_revoked_key = client.get("/api/auth/me", headers={"X-AgentReview-API-Key": created["api_key"]})
@@ -185,6 +346,69 @@ def test_api_key_management_blocks_self_revoke_and_cross_org_revoke(client: Test
     assert cross_org_response.json() == {"detail": "API key not found"}
 
 
+def test_api_key_roles_limit_mutating_and_analysis_access(client: TestClient) -> None:
+    ci_response = client.post(
+        "/api/api-keys",
+        json={
+            "name": "CI submitter",
+            "role": "ci",
+        },
+    )
+    assert ci_response.status_code == 200
+    ci_key = ci_response.json()["api_key"]
+    assert ci_response.json()["role"] == "ci"
+
+    read_only_response = client.post(
+        "/api/api-keys",
+        json={
+            "name": "Read only reviewer",
+            "role": "read_only",
+        },
+    )
+    assert read_only_response.status_code == 200
+    read_only_key = read_only_response.json()["api_key"]
+    assert read_only_response.json()["role"] == "read_only"
+
+    diff_text = (PROJECT_ROOT / "examples" / "sample.diff").read_text(encoding="utf-8")
+    ci_analysis_response = client.post(
+        "/api/analyze/diff",
+        headers={"X-AgentReview-API-Key": ci_key},
+        json={
+            "diff": diff_text,
+            "repository": "platform/checkout-api",
+        },
+    )
+    assert ci_analysis_response.status_code == 200
+
+    ci_admin_response = client.post(
+        "/api/users",
+        headers={"X-AgentReview-API-Key": ci_key},
+        json={
+            "email": "ci-admin@example.com",
+            "role": "reviewer",
+        },
+    )
+    assert ci_admin_response.status_code == 403
+    assert ci_admin_response.json() == {"detail": "Admin AgentReviewOps API key required"}
+
+    read_only_analysis_response = client.post(
+        "/api/analyze/diff",
+        headers={"X-AgentReview-API-Key": read_only_key},
+        json={
+            "diff": diff_text,
+            "repository": "platform/checkout-api",
+        },
+    )
+    assert read_only_analysis_response.status_code == 403
+    assert read_only_analysis_response.json() == {"detail": "Admin or CI AgentReviewOps API key required"}
+
+    read_only_list_response = client.get(
+        "/api/analysis-runs",
+        headers={"X-AgentReview-API-Key": read_only_key},
+    )
+    assert read_only_list_response.status_code == 200
+
+
 def test_policy_create_list_and_org_override_applies_to_analysis(client: TestClient) -> None:
     policy_response = client.post(
         "/api/policies",
@@ -206,6 +430,9 @@ def test_policy_create_list_and_org_override_applies_to_analysis(client: TestCli
     policy_body = policy_response.json()
     assert policy_body["policy_id"]
     assert policy_body["name"] == "Low-friction docs pilot"
+    assert policy_body["scope"] == "organization"
+    assert policy_body["repository_id"] is None
+    assert policy_body["repository_full_name"] is None
     assert policy_body["config"]["critical_paths"] == ["never/**"]
 
     audit_response = client.get("/api/audit-events")
@@ -248,6 +475,122 @@ def test_policy_create_list_and_org_override_applies_to_analysis(client: TestCli
     policy_filter_response = client.get("/api/audit-events", params={"action": "policy.created"})
     assert policy_filter_response.status_code == 200
     assert [event["action"] for event in policy_filter_response.json()] == ["policy.created"]
+
+
+def test_repository_scoped_policy_overrides_org_policy_and_records_routing(client: TestClient) -> None:
+    repositories_response = client.get("/api/repositories")
+    assert repositories_response.status_code == 200
+    repository = repositories_response.json()[0]
+
+    org_policy_response = client.post(
+        "/api/policies",
+        json={
+            "name": "Relaxed organization policy",
+            "config": {
+                "version": 1,
+                "critical_paths": ["never/**"],
+                "rules": {
+                    "require_tests_for_code_changes": False,
+                    "flag_auth_changes": False,
+                },
+            },
+            "enabled": True,
+        },
+    )
+    assert org_policy_response.status_code == 200
+
+    repo_policy_response = client.post(
+        "/api/policies",
+        json={
+            "name": "Checkout API policy",
+            "scope": "repository",
+            "repository_id": repository["repository_id"],
+            "config": {
+                "version": 1,
+                "critical_paths": ["auth/**"],
+                "rules": {
+                    "require_tests_for_code_changes": False,
+                    "flag_auth_changes": False,
+                },
+            },
+            "enabled": True,
+        },
+    )
+    assert repo_policy_response.status_code == 200
+    repo_policy = repo_policy_response.json()
+    assert repo_policy["scope"] == "repository"
+    assert repo_policy["repository_id"] == repository["repository_id"]
+    assert repo_policy["repository_full_name"] == "platform/checkout-api"
+
+    diff_text = (PROJECT_ROOT / "examples" / "sample.diff").read_text(encoding="utf-8")
+    analysis_response = client.post(
+        "/api/analyze/diff",
+        json={
+            "diff": diff_text,
+            "repository": "platform/checkout-api",
+        },
+    )
+
+    assert analysis_response.status_code == 200
+    analysis_body = analysis_response.json()
+    assert "critical-path-change" in {finding["rule_id"] for finding in analysis_body["findings"]}
+    assert analysis_body["risk_score"] > 0
+
+    audit_response = client.get("/api/audit-events", params={"action": "analysis.created"})
+    assert audit_response.status_code == 200
+    analysis_audit = audit_response.json()[0]
+    assert analysis_audit["metadata"]["config_source"] == "repository_policy"
+    assert analysis_audit["metadata"]["policy_id"] == repo_policy["policy_id"]
+    assert analysis_audit["metadata"]["policy_name"] == "Checkout API policy"
+    assert analysis_audit["metadata"]["repository_id"] == repository["repository_id"]
+    assert analysis_audit["metadata"]["routed_reviewer_count"] == 1
+    assert analysis_audit["metadata"]["routed_reviewer_roles"] == ["maintainer"]
+
+    unknown_repo_response = client.post(
+        "/api/analyze/diff",
+        json={
+            "diff": diff_text,
+            "repository": "platform/unknown-api",
+        },
+    )
+
+    assert unknown_repo_response.status_code == 200
+    assert unknown_repo_response.json()["risk_score"] == 0
+
+
+def test_repository_policy_requires_repository_from_same_org(client: TestClient) -> None:
+    missing_repository_response = client.post(
+        "/api/policies",
+        json={
+            "name": "Repository policy",
+            "scope": "repository",
+            "config": {"version": 1},
+        },
+    )
+    assert missing_repository_response.status_code == 422
+    assert missing_repository_response.json() == {"detail": "repository_id is required for repository-scoped policies"}
+
+    with app.state.test_session_factory() as session:
+        other_org = create_organization(session, slug="policy-other", name="Policy Other")
+        other_repo = create_repository(
+            session,
+            organization_id=other_org.id,
+            provider="github",
+            owner="platform",
+            name="other-api",
+        )
+
+    cross_org_response = client.post(
+        "/api/policies",
+        json={
+            "name": "Cross org policy",
+            "scope": "repository",
+            "repository_id": other_repo.id,
+            "config": {"version": 1},
+        },
+    )
+    assert cross_org_response.status_code == 404
+    assert cross_org_response.json() == {"detail": "Repository not found"}
 
 
 def test_invalid_policy_config_returns_precise_validation_error(client: TestClient) -> None:
@@ -324,6 +667,42 @@ def test_analyze_diff_persists_and_returns_report(client: TestClient) -> None:
     )
     assert target_filter_response.status_code == 200
     assert target_filter_response.json()[0]["target_id"] == body["analysis_run_id"]
+
+
+def test_analyze_diff_runs_enabled_builtin_plugin(client: TestClient) -> None:
+    diff_text = """diff --git a/package.json b/package.json
+index 1111111..2222222 100644
+--- a/package.json
++++ b/package.json
+@@ -1,3 +1,4 @@
+ {
+-  "dependencies": {}
++  "dependencies": {"left-pad": "1.3.0"}
+ }
+"""
+
+    response = client.post(
+        "/api/analyze/diff",
+        json={
+            "diff": diff_text,
+            "config": {
+                "version": 1,
+                "plugins": [
+                    {
+                        "id": "dependency-manifest",
+                        "enabled": True,
+                        "permissions": ["read_diff"],
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    rule_ids = {finding["rule_id"] for finding in body["findings"]}
+    assert "plugin-dependency-manifest" in rule_ids
+    assert body["markdown"].count("plugin-dependency-manifest") == 1
 
 
 def test_list_analysis_runs_returns_dashboard_summaries(client: TestClient) -> None:

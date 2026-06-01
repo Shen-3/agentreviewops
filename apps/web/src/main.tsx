@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { AlertTriangle, ClipboardCopy, Database, Download, KeyRound, LogOut, RefreshCcw, Search, ShieldCheck } from "lucide-react";
+import { ClipboardCopy, Download, KeyRound, LogOut, RefreshCcw, Search, ShieldCheck } from "lucide-react";
 
 import "./styles.css";
 
@@ -59,16 +59,46 @@ type AuditEvent = {
 type ApiKeyRecord = {
   id: string;
   name: string;
+  role: "admin" | "ci" | "read_only";
   keyPrefix: string;
   createdAt: string;
   revokedAt: string | null;
   isCurrent: boolean;
 };
 
+type UserRecord = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  createdAt: string;
+};
+
+type RepositoryRecord = {
+  id: string;
+  provider: string;
+  owner: string;
+  name: string;
+  fullName: string;
+  defaultBranch: string;
+  visibility: string;
+  reviewers: RepositoryReviewer[];
+  createdAt: string;
+};
+
+type RepositoryReviewer = {
+  userId: string;
+  email: string;
+  name: string | null;
+  role: string;
+};
+
 type CreatedApiKey = {
   name: string;
   value: string;
 };
+
+type ApiKeyRole = "admin" | "ci" | "read_only";
 
 type RulesConfigPayload = Record<RuleId, boolean>;
 
@@ -90,6 +120,8 @@ type PolicyRecord = {
   id: string;
   name: string;
   scope: string;
+  repositoryId: string | null;
+  repositoryFullName: string | null;
   enabled: boolean;
   config: PolicyConfigPayload;
   createdAt: string;
@@ -99,12 +131,44 @@ type PolicyRecord = {
 type PolicyFormState = {
   name: string;
   enabled: boolean;
+  scope: "organization" | "repository";
+  repositoryId: string;
   failLevel: RiskLevel;
   maxFiles: string;
   maxLines: string;
   criticalPathsText: string;
   testPatternsText: string;
   rules: RulesConfigPayload;
+};
+
+type DiffSubmitFormState = {
+  diff: string;
+  repository: string;
+  pullRequestNumber: string;
+  title: string;
+  author: string;
+  agentName: string;
+  branch: string;
+};
+
+type RepositoryFormState = {
+  provider: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  visibility: string;
+};
+
+type UserFormState = {
+  email: string;
+  name: string;
+  role: "admin" | "reviewer";
+};
+
+type MembershipFormState = {
+  repositoryId: string;
+  userId: string;
+  role: "owner" | "maintainer" | "reviewer";
 };
 
 type ApiSummary = {
@@ -160,10 +224,36 @@ type ApiAuditEvent = {
 type ApiKeyPayload = {
   api_key_id: string;
   name: string;
+  role: ApiKeyRole;
   key_prefix: string;
   created_at: string;
   revoked_at: string | null;
   is_current: boolean;
+};
+
+type ApiUserPayload = {
+  user_id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  created_at: string;
+};
+
+type ApiRepositoryPayload = {
+  repository_id: string;
+  provider: string;
+  owner: string;
+  name: string;
+  full_name: string;
+  default_branch: string | null;
+  visibility: string | null;
+  reviewers: Array<{
+    user_id: string;
+    email: string;
+    name: string | null;
+    role: string;
+  }>;
+  created_at: string;
 };
 
 type ApiKeyCreatePayload = ApiKeyPayload & {
@@ -174,6 +264,8 @@ type ApiPolicyPayload = {
   policy_id: string;
   name: string;
   scope: string;
+  repository_id: string | null;
+  repository_full_name: string | null;
   enabled: boolean;
   config: PolicyConfigPayload;
   created_at: string;
@@ -374,6 +466,7 @@ const seededApiKeys: ApiKeyRecord[] = [
   {
     id: "key_local_ci",
     name: "Local CI",
+    role: "admin",
     keyPrefix: "arok_demo_ci",
     createdAt: "05/23/2026, 10:39",
     revokedAt: null,
@@ -382,6 +475,7 @@ const seededApiKeys: ApiKeyRecord[] = [
   {
     id: "key_dashboard_operator",
     name: "Dashboard operator",
+    role: "admin",
     keyPrefix: "arok_demo_ui",
     createdAt: "05/23/2026, 10:42",
     revokedAt: null,
@@ -390,10 +484,46 @@ const seededApiKeys: ApiKeyRecord[] = [
   {
     id: "key_retired",
     name: "Retired bootstrap key",
+    role: "read_only",
     keyPrefix: "arok_demo_old",
     createdAt: "05/22/2026, 18:12",
     revokedAt: "05/23/2026, 09:05",
     isCurrent: false,
+  },
+];
+
+const seededUsers: UserRecord[] = [
+  {
+    id: "user_reviewer",
+    email: "reviewer@example.com",
+    name: "Reviewer",
+    role: "admin",
+    createdAt: "05/23/2026, 10:38",
+  },
+];
+
+const seededRepositories: RepositoryRecord[] = [
+  {
+    id: "repo_checkout_api",
+    provider: "github",
+    owner: "platform",
+    name: "checkout-api",
+    fullName: "platform/checkout-api",
+    defaultBranch: "main",
+    visibility: "private",
+    reviewers: [{ userId: "user_reviewer", email: "reviewer@example.com", name: "Reviewer", role: "maintainer" }],
+    createdAt: "05/23/2026, 10:38",
+  },
+  {
+    id: "repo_web_console",
+    provider: "github",
+    owner: "growth",
+    name: "web-console",
+    fullName: "growth/web-console",
+    defaultBranch: "main",
+    visibility: "private",
+    reviewers: [],
+    createdAt: "05/23/2026, 10:41",
   },
 ];
 
@@ -402,6 +532,8 @@ const seededPolicies: PolicyRecord[] = [
     id: "policy_default",
     name: "Default review policy",
     scope: "organization",
+    repositoryId: null,
+    repositoryFullName: null,
     enabled: true,
     config: defaultPolicyConfig,
     createdAt: "05/23/2026, 10:42",
@@ -409,10 +541,42 @@ const seededPolicies: PolicyRecord[] = [
   },
 ];
 
+const emptyDiffSubmitForm: DiffSubmitFormState = {
+  diff: "",
+  repository: "",
+  pullRequestNumber: "",
+  title: "",
+  author: "",
+  agentName: "",
+  branch: "",
+};
+
+const emptyRepositoryForm: RepositoryFormState = {
+  provider: "github",
+  owner: "",
+  name: "",
+  defaultBranch: "main",
+  visibility: "private",
+};
+
+const emptyUserForm: UserFormState = {
+  email: "",
+  name: "",
+  role: "reviewer",
+};
+
+const emptyMembershipForm: MembershipFormState = {
+  repositoryId: "",
+  userId: "",
+  role: "reviewer",
+};
+
 function Dashboard() {
   const [analyses, setAnalyses] = React.useState<Analysis[]>([]);
   const [auditEvents, setAuditEvents] = React.useState<AuditEvent[]>([]);
   const [apiKeys, setApiKeys] = React.useState<ApiKeyRecord[]>([]);
+  const [users, setUsers] = React.useState<UserRecord[]>([]);
+  const [repositories, setRepositories] = React.useState<RepositoryRecord[]>([]);
   const [policies, setPolicies] = React.useState<PolicyRecord[]>([]);
   const [policyForm, setPolicyForm] = React.useState<PolicyFormState>(() => policyToForm(seededPolicies[0]));
   const [policyStatus, setPolicyStatus] = React.useState("");
@@ -425,7 +589,17 @@ function Dashboard() {
   const [apiKey, setApiKey] = React.useState(() => window.localStorage.getItem(API_KEY_STORAGE_KEY) || "");
   const [apiKeyInput, setApiKeyInput] = React.useState("");
   const [newApiKeyName, setNewApiKeyName] = React.useState("");
+  const [newApiKeyRole, setNewApiKeyRole] = React.useState<ApiKeyRole>("admin");
   const [createdApiKey, setCreatedApiKey] = React.useState<CreatedApiKey | null>(null);
+  const [diffForm, setDiffForm] = React.useState<DiffSubmitFormState>(emptyDiffSubmitForm);
+  const [diffSubmitStatus, setDiffSubmitStatus] = React.useState("");
+  const [isSubmittingDiff, setIsSubmittingDiff] = React.useState(false);
+  const [repositoryForm, setRepositoryForm] = React.useState<RepositoryFormState>(emptyRepositoryForm);
+  const [repositoryStatus, setRepositoryStatus] = React.useState("");
+  const [userForm, setUserForm] = React.useState<UserFormState>(emptyUserForm);
+  const [userStatus, setUserStatus] = React.useState("");
+  const [membershipForm, setMembershipForm] = React.useState<MembershipFormState>(emptyMembershipForm);
+  const [membershipStatus, setMembershipStatus] = React.useState("");
 
   const loadWorkspaceData = React.useCallback(async () => {
     setMode("loading");
@@ -433,6 +607,8 @@ function Dashboard() {
       setAnalyses(seededAnalyses);
       setAuditEvents(seededAuditEvents);
       setApiKeys(seededApiKeys);
+      setUsers(seededUsers);
+      setRepositories(seededRepositories);
       setPolicies(seededPolicies);
       setPolicyForm(policyToForm(seededPolicies[0]));
       setCreatedApiKey(null);
@@ -442,27 +618,35 @@ function Dashboard() {
       return;
     }
     try {
-      const [analysisResponse, auditResponse, apiKeysResponse, policiesResponse] = await Promise.all([
+      const [analysisResponse, auditResponse, apiKeysResponse, usersResponse, repositoriesResponse, policiesResponse] = await Promise.all([
         fetchWithTimeout(`${API_BASE_URL}/api/analysis-runs`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/audit-events?limit=50`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/api-keys`, apiKey),
+        fetchWithTimeout(`${API_BASE_URL}/api/users`, apiKey),
+        fetchWithTimeout(`${API_BASE_URL}/api/repositories`, apiKey),
         fetchWithTimeout(`${API_BASE_URL}/api/policies`, apiKey),
       ]);
       const summaries = (await analysisResponse.json()) as ApiSummary[];
       const auditPayload = (await auditResponse.json()) as ApiAuditEvent[];
       const apiKeyPayload = (await apiKeysResponse.json()) as ApiKeyPayload[];
+      const userPayload = (await usersResponse.json()) as ApiUserPayload[];
+      const repositoryPayload = (await repositoriesResponse.json()) as ApiRepositoryPayload[];
       const policyPayload = (await policiesResponse.json()) as ApiPolicyPayload[];
       const normalized = summaries.map(normalizeSummary);
       const normalizedAudit = auditPayload.map(normalizeAuditEvent);
       const normalizedApiKeys = apiKeyPayload.map(normalizeApiKey);
+      const normalizedUsers = userPayload.map(normalizeUser);
+      const normalizedRepositories = repositoryPayload.map(normalizeRepository);
       const normalizedPolicies = policyPayload.map(normalizePolicy);
       setAnalyses(normalized);
       setAuditEvents(normalizedAudit);
       setApiKeys(normalizedApiKeys);
+      setUsers(normalizedUsers);
+      setRepositories(normalizedRepositories);
       setPolicies(normalizedPolicies);
       setPolicyForm(policyToForm(normalizedPolicies[0] ?? seededPolicies[0]));
       setDataSource("api");
-      setMode(normalized.length || normalizedAudit.length || normalizedApiKeys.length || normalizedPolicies.length ? "ready" : "empty");
+      setMode(normalized.length || normalizedAudit.length || normalizedApiKeys.length || normalizedUsers.length || normalizedRepositories.length || normalizedPolicies.length ? "ready" : "empty");
       setSelectedId(normalized[0]?.id ?? null);
       if (normalized[0]) {
         void loadAnalysisDetail(normalized[0].id, apiKey, setAnalyses, setMode);
@@ -471,18 +655,17 @@ function Dashboard() {
       if (isAuthError(error)) {
         window.localStorage.removeItem(API_KEY_STORAGE_KEY);
         setApiKey("");
-        setMode("error");
-        return;
       }
-      setAnalyses(seededAnalyses);
-      setAuditEvents(seededAuditEvents);
-      setApiKeys(seededApiKeys);
-      setPolicies(seededPolicies);
-      setPolicyForm(policyToForm(seededPolicies[0]));
+      setAnalyses([]);
+      setAuditEvents([]);
+      setApiKeys([]);
+      setUsers([]);
+      setRepositories([]);
+      setPolicies([]);
       setCreatedApiKey(null);
-      setSelectedId(seededAnalyses[0].id);
-      setDataSource("demo");
-      setMode("ready");
+      setSelectedId(null);
+      setDataSource("api");
+      setMode("error");
     }
   }, [apiKey]);
 
@@ -531,9 +714,14 @@ function Dashboard() {
     setAnalyses(seededAnalyses);
     setAuditEvents(seededAuditEvents);
     setApiKeys(seededApiKeys);
+    setUsers(seededUsers);
+    setRepositories(seededRepositories);
     setPolicies(seededPolicies);
     setPolicyForm(policyToForm(seededPolicies[0]));
     setPolicyStatus("");
+    setUserStatus("");
+    setMembershipStatus("");
+    setNewApiKeyRole("admin");
     setCreatedApiKey(null);
     setSelectedId(seededAnalyses[0].id);
     setDataSource("demo");
@@ -551,13 +739,14 @@ function Dashboard() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ name: normalizedName }),
+        body: JSON.stringify({ name: normalizedName, role: newApiKeyRole }),
       });
       const payload = (await response.json()) as ApiKeyCreatePayload;
       const record = normalizeApiKey(payload);
       setApiKeys((current) => [record, ...current]);
       setCreatedApiKey({ name: record.name, value: payload.api_key });
       setNewApiKeyName("");
+      setNewApiKeyRole("admin");
       void loadWorkspaceData();
     } catch (error) {
       if (isAuthError(error)) {
@@ -565,6 +754,171 @@ function Dashboard() {
         setApiKey("");
       }
       setMode("error");
+    }
+  };
+  const createDashboardRepository = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    if (!repositoryForm.owner.trim() || !repositoryForm.name.trim()) {
+      setRepositoryStatus("Owner and name are required.");
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/repositories`, apiKey, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(compactPayload({
+          provider: repositoryForm.provider.trim() || "github",
+          owner: repositoryForm.owner.trim(),
+          name: repositoryForm.name.trim(),
+          default_branch: repositoryForm.defaultBranch.trim() || null,
+          visibility: repositoryForm.visibility.trim() || null,
+        })),
+      });
+      const repository = normalizeRepository((await response.json()) as ApiRepositoryPayload);
+      setRepositories((current) => [repository, ...current.filter((record) => record.id !== repository.id)]);
+      setRepositoryForm(emptyRepositoryForm);
+      setRepositoryStatus(`${repository.fullName} onboarded.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setMode("error");
+        return;
+      }
+      setRepositoryStatus(error instanceof Error && error.message.includes("409") ? "Repository already exists." : "Repository could not be created.");
+      if (!(error instanceof Error) || !error.message.includes("409")) {
+        setMode("error");
+      }
+    }
+  };
+  const createDashboardUser = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    if (!userForm.email.trim()) {
+      setUserStatus("User email is required.");
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/users`, apiKey, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(compactPayload({
+          email: userForm.email.trim(),
+          name: userForm.name.trim() || null,
+          role: userForm.role,
+        })),
+      });
+      const user = normalizeUser((await response.json()) as ApiUserPayload);
+      setUsers((current) => [user, ...current.filter((record) => record.id !== user.id)]);
+      setUserForm(emptyUserForm);
+      setUserStatus(`${user.email} added.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setMode("error");
+        return;
+      }
+      setUserStatus(error instanceof Error && error.message.includes("409") ? "User already exists." : "User could not be created.");
+      if (!(error instanceof Error) || !error.message.includes("409")) {
+        setMode("error");
+      }
+    }
+  };
+  const assignDashboardMembership = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    if (!membershipForm.repositoryId || !membershipForm.userId) {
+      setMembershipStatus("Choose a repository and user.");
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/repositories/${membershipForm.repositoryId}/memberships`, apiKey, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: membershipForm.userId,
+          role: membershipForm.role,
+        }),
+      });
+      const repository = normalizeRepository((await response.json()) as ApiRepositoryPayload);
+      setRepositories((current) => current.map((record) => (record.id === repository.id ? repository : record)));
+      setMembershipForm(emptyMembershipForm);
+      setMembershipStatus(`${repository.fullName} routing updated.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setMode("error");
+        return;
+      }
+      setMembershipStatus(error instanceof Error && error.message.includes("409") ? "User is already assigned to that repository." : "Review routing could not be updated.");
+      if (!(error instanceof Error) || !error.message.includes("409")) {
+        setMode("error");
+      }
+    }
+  };
+  const removeDashboardMembership = async (repositoryId: string, userId: string) => {
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/repositories/${repositoryId}/memberships/${userId}`, apiKey, {
+        method: "DELETE",
+      });
+      const repository = normalizeRepository((await response.json()) as ApiRepositoryPayload);
+      setRepositories((current) => current.map((record) => (record.id === repository.id ? repository : record)));
+      setMembershipStatus(`${repository.fullName} routing updated.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setMode("error");
+        return;
+      }
+      setMembershipStatus("Review routing could not be removed.");
+      setMode("error");
+    }
+  };
+  const deleteDashboardUser = async (userId: string) => {
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    try {
+      await fetchWithTimeout(`${API_BASE_URL}/api/users/${userId}`, apiKey, {
+        method: "DELETE",
+      });
+      setUsers((current) => current.filter((record) => record.id !== userId));
+      setUserStatus("User removed.");
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setMode("error");
+        return;
+      }
+      setUserStatus(error instanceof Error && error.message.includes("400") ? "Cannot remove the last admin." : "User could not be removed.");
+      if (!(error instanceof Error) || !error.message.includes("400")) {
+        setMode("error");
+      }
     }
   };
   const revokeDashboardApiKey = async (apiKeyId: string) => {
@@ -600,6 +954,10 @@ function Dashboard() {
       setPolicyStatus("Large diff thresholds must be positive whole numbers.");
       return;
     }
+    if (policyForm.scope === "repository" && !policyForm.repositoryId) {
+      setPolicyStatus("Choose a repository for repository-scoped policies.");
+      return;
+    }
     try {
       const response = await fetchWithTimeout(`${API_BASE_URL}/api/policies`, apiKey, {
         method: "POST",
@@ -609,14 +967,19 @@ function Dashboard() {
         body: JSON.stringify({
           name: policyForm.name.trim(),
           enabled: policyForm.enabled,
-          scope: "organization",
+          scope: policyForm.scope,
+          repository_id: policyForm.scope === "repository" ? policyForm.repositoryId : null,
           config,
         }),
       });
       const saved = normalizePolicy((await response.json()) as ApiPolicyPayload);
       setPolicies((current) => [saved, ...current]);
       setPolicyForm(policyToForm(saved));
-      setPolicyStatus("Policy saved. New analyses will use the latest enabled policy.");
+      setPolicyStatus(
+        saved.scope === "repository"
+          ? `Policy saved for ${saved.repositoryFullName}.`
+          : "Policy saved. New analyses will use the latest enabled policy.",
+      );
       void loadWorkspaceData();
     } catch (error) {
       if (isAuthError(error)) {
@@ -650,6 +1013,64 @@ function Dashboard() {
       setMode("error");
     }
   };
+  const submitDashboardDiff = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    const diff = diffForm.diff.trim();
+    if (!diff) {
+      setDiffSubmitStatus("Diff is required.");
+      return;
+    }
+    const pullRequestNumber = parseOptionalPositiveInteger(diffForm.pullRequestNumber);
+    if (pullRequestNumber === null) {
+      setDiffSubmitStatus("Pull request number must be a positive whole number.");
+      return;
+    }
+
+    setIsSubmittingDiff(true);
+    try {
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/api/analyze/diff`,
+        apiKey,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(compactPayload({
+            diff,
+            repository: diffForm.repository.trim() || null,
+            pull_request_number: pullRequestNumber,
+            title: diffForm.title.trim() || null,
+            author: diffForm.author.trim() || null,
+            agent_name: diffForm.agentName.trim() || null,
+            branch: diffForm.branch.trim() || null,
+          })),
+        },
+        15000,
+      );
+      const detail = (await response.json()) as ApiDetail;
+      const submitted = normalizeSubmittedAnalysis(detail, diffForm);
+      setAnalyses((current) => [submitted, ...current.filter((analysis) => analysis.id !== submitted.id)]);
+      setSelectedId(submitted.id);
+      setDataSource("api");
+      setMode("ready");
+      setDiffForm(emptyDiffSubmitForm);
+      setDiffSubmitStatus(`Analysis ${shortId(submitted.id)} created.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+      }
+      setDiffSubmitStatus("Analysis could not be created.");
+      setMode("error");
+    } finally {
+      setIsSubmittingDiff(false);
+    }
+  };
 
   return (
     <div className="app-shell">
@@ -666,6 +1087,12 @@ function Dashboard() {
         <nav>
           <a className="nav-link active" href="#analyses">
             Analyses
+          </a>
+          <a className="nav-link" href="#repositories">
+            Repositories
+          </a>
+          <a className="nav-link" href="#users">
+            Users
           </a>
           <a className="nav-link" href="#policies">
             Policies
@@ -706,21 +1133,9 @@ function Dashboard() {
                 </button>
               ) : null}
             </form>
-            <button type="button" onClick={() => setMode("loading")}>
-              <RefreshCcw size={16} />
-              Loading
-            </button>
-            <button type="button" onClick={() => setMode("error")}>
-              <AlertTriangle size={16} />
-              Error
-            </button>
-            <button type="button" onClick={() => setMode("empty")}>
-              <Database size={16} />
-              Empty
-            </button>
             <button className="primary" type="button" onClick={() => void loadWorkspaceData()}>
-              <ShieldCheck size={16} />
-              Live data
+              <RefreshCcw size={16} />
+              Refresh
             </button>
           </div>
         </header>
@@ -737,6 +1152,16 @@ function Dashboard() {
           <Metric label="Open findings" value={findingCount} />
           <Metric label="Active keys" value={activeApiKeyCount} />
         </section>
+
+        <DiffSubmitPanel
+          form={diffForm}
+          mode={mode}
+          dataSource={dataSource}
+          status={diffSubmitStatus}
+          isSubmitting={isSubmittingDiff}
+          onFormChange={setDiffForm}
+          onSubmit={submitDashboardDiff}
+        />
 
         <section className="content-grid">
           <section className="analysis-list" aria-labelledby="analysis-list-title">
@@ -778,8 +1203,36 @@ function Dashboard() {
           <AnalysisDetail selected={selected} />
         </section>
 
+        <RepositoryAdmin
+          repositories={repositories}
+          users={users}
+          mode={mode}
+          dataSource={dataSource}
+          form={repositoryForm}
+          status={repositoryStatus}
+          membershipForm={membershipForm}
+          membershipStatus={membershipStatus}
+          onFormChange={setRepositoryForm}
+          onCreate={createDashboardRepository}
+          onMembershipFormChange={setMembershipForm}
+          onAssignMembership={assignDashboardMembership}
+          onRemoveMembership={(repositoryId, userId) => void removeDashboardMembership(repositoryId, userId)}
+        />
+
+        <UserAdmin
+          users={users}
+          mode={mode}
+          dataSource={dataSource}
+          form={userForm}
+          status={userStatus}
+          onFormChange={setUserForm}
+          onCreate={createDashboardUser}
+          onDelete={(userId) => void deleteDashboardUser(userId)}
+        />
+
         <PolicyEditor
           policies={policies}
+          repositories={repositories}
           form={policyForm}
           mode={mode}
           dataSource={dataSource}
@@ -793,8 +1246,10 @@ function Dashboard() {
           mode={mode}
           dataSource={dataSource}
           newApiKeyName={newApiKeyName}
+          newApiKeyRole={newApiKeyRole}
           createdApiKey={createdApiKey}
           onNameChange={setNewApiKeyName}
+          onRoleChange={setNewApiKeyRole}
           onCreate={createDashboardApiKey}
           onDismissCreated={() => setCreatedApiKey(null)}
           onRevoke={(apiKeyId) => void revokeDashboardApiKey(apiKeyId)}
@@ -820,6 +1275,107 @@ function Metric({ label, value }: { label: string; value: number }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function DiffSubmitPanel({
+  form,
+  mode,
+  dataSource,
+  status,
+  isSubmitting,
+  onFormChange,
+  onSubmit,
+}: {
+  form: DiffSubmitFormState;
+  mode: LoadMode;
+  dataSource: DataSource;
+  status: string;
+  isSubmitting: boolean;
+  onFormChange: React.Dispatch<React.SetStateAction<DiffSubmitFormState>>;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  const liveData = dataSource === "api" && mode !== "error";
+  return (
+    <section className="diff-submit-panel" id="submit-diff" aria-labelledby="diff-submit-title">
+      <div className="section-head">
+        <div>
+          <p className="eyebrow">Analyze</p>
+          <h2 id="diff-submit-title">Submit diff</h2>
+        </div>
+        {status ? <span className="policy-status">{status}</span> : null}
+      </div>
+      <form className="diff-submit-form" onSubmit={onSubmit}>
+        <div className="diff-submit-grid">
+          <label>
+            <span>Repository</span>
+            <input
+              value={form.repository}
+              onChange={(event) => onFormChange((current) => ({ ...current, repository: event.target.value }))}
+              disabled={!liveData || isSubmitting}
+              placeholder="owner/name"
+            />
+          </label>
+          <label>
+            <span>PR</span>
+            <input
+              value={form.pullRequestNumber}
+              onChange={(event) => onFormChange((current) => ({ ...current, pullRequestNumber: event.target.value }))}
+              disabled={!liveData || isSubmitting}
+              inputMode="numeric"
+            />
+          </label>
+          <label>
+            <span>Title</span>
+            <input
+              value={form.title}
+              onChange={(event) => onFormChange((current) => ({ ...current, title: event.target.value }))}
+              disabled={!liveData || isSubmitting}
+            />
+          </label>
+          <label>
+            <span>Branch</span>
+            <input
+              value={form.branch}
+              onChange={(event) => onFormChange((current) => ({ ...current, branch: event.target.value }))}
+              disabled={!liveData || isSubmitting}
+            />
+          </label>
+          <label>
+            <span>Author</span>
+            <input
+              value={form.author}
+              onChange={(event) => onFormChange((current) => ({ ...current, author: event.target.value }))}
+              disabled={!liveData || isSubmitting}
+            />
+          </label>
+          <label>
+            <span>Agent</span>
+            <input
+              value={form.agentName}
+              onChange={(event) => onFormChange((current) => ({ ...current, agentName: event.target.value }))}
+              disabled={!liveData || isSubmitting}
+            />
+          </label>
+        </div>
+        <label className="diff-input">
+          <span>Unified diff</span>
+          <textarea
+            value={form.diff}
+            onChange={(event) => onFormChange((current) => ({ ...current, diff: event.target.value }))}
+            disabled={!liveData || isSubmitting}
+            rows={9}
+            placeholder="diff --git a/file b/file"
+          />
+        </label>
+        <div className="policy-actions">
+          <button className="primary" type="submit" disabled={!liveData || isSubmitting}>
+            <ShieldCheck size={16} />
+            {isSubmitting ? "Analyzing" : "Analyze diff"}
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -978,8 +1534,369 @@ function ReportPreview({ report }: { report: string }) {
   );
 }
 
+function RepositoryAdmin({
+  repositories,
+  users,
+  mode,
+  dataSource,
+  form,
+  status,
+  membershipForm,
+  membershipStatus,
+  onFormChange,
+  onCreate,
+  onMembershipFormChange,
+  onAssignMembership,
+  onRemoveMembership,
+}: {
+  repositories: RepositoryRecord[];
+  users: UserRecord[];
+  mode: LoadMode;
+  dataSource: DataSource;
+  form: RepositoryFormState;
+  status: string;
+  membershipForm: MembershipFormState;
+  membershipStatus: string;
+  onFormChange: React.Dispatch<React.SetStateAction<RepositoryFormState>>;
+  onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
+  onMembershipFormChange: React.Dispatch<React.SetStateAction<MembershipFormState>>;
+  onAssignMembership: (event: React.FormEvent<HTMLFormElement>) => void;
+  onRemoveMembership: (repositoryId: string, userId: string) => void;
+}) {
+  const liveData = dataSource === "api" && mode !== "error";
+  return (
+    <section className="repository-panel" id="repositories" aria-labelledby="repository-admin-title">
+      <div className="section-head">
+        <div>
+          <p className="eyebrow">Repository scope</p>
+          <h2 id="repository-admin-title">Repositories</h2>
+          <p>{repositories.length} onboarded</p>
+        </div>
+        <form className="repository-create-form" onSubmit={onCreate}>
+          <label>
+            <span>Provider</span>
+            <input
+              value={form.provider}
+              onChange={(event) => onFormChange((current) => ({ ...current, provider: event.target.value }))}
+              disabled={!liveData}
+            />
+          </label>
+          <label>
+            <span>Owner</span>
+            <input
+              value={form.owner}
+              onChange={(event) => onFormChange((current) => ({ ...current, owner: event.target.value }))}
+              disabled={!liveData}
+              placeholder="platform"
+            />
+          </label>
+          <label>
+            <span>Name</span>
+            <input
+              value={form.name}
+              onChange={(event) => onFormChange((current) => ({ ...current, name: event.target.value }))}
+              disabled={!liveData}
+              placeholder="checkout-api"
+            />
+          </label>
+          <label>
+            <span>Default branch</span>
+            <input
+              value={form.defaultBranch}
+              onChange={(event) => onFormChange((current) => ({ ...current, defaultBranch: event.target.value }))}
+              disabled={!liveData}
+            />
+          </label>
+          <label>
+            <span>Visibility</span>
+            <select value={form.visibility} onChange={(event) => onFormChange((current) => ({ ...current, visibility: event.target.value }))} disabled={!liveData}>
+              <option value="private">Private</option>
+              <option value="public">Public</option>
+              <option value="">Unspecified</option>
+            </select>
+          </label>
+          <button className="primary" type="submit" disabled={!liveData || !form.owner.trim() || !form.name.trim()}>
+            <ShieldCheck size={16} />
+            Add
+          </button>
+        </form>
+      </div>
+      {status ? <span className="policy-status">{status}</span> : null}
+      <form className="repository-routing-form" onSubmit={onAssignMembership}>
+        <label>
+          <span>Route repository</span>
+          <select
+            value={membershipForm.repositoryId}
+            onChange={(event) => onMembershipFormChange((current) => ({ ...current, repositoryId: event.target.value }))}
+            disabled={!liveData || !repositories.length}
+          >
+            <option value="">Choose repository</option>
+            {repositories.map((repository) => (
+              <option value={repository.id} key={repository.id}>
+                {repository.fullName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Reviewer</span>
+          <select
+            value={membershipForm.userId}
+            onChange={(event) => onMembershipFormChange((current) => ({ ...current, userId: event.target.value }))}
+            disabled={!liveData || !users.length}
+          >
+            <option value="">Choose user</option>
+            {users.map((user) => (
+              <option value={user.id} key={user.id}>
+                {user.name || user.email}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Repository role</span>
+          <select
+            value={membershipForm.role}
+            onChange={(event) => onMembershipFormChange((current) => ({ ...current, role: event.target.value as "owner" | "maintainer" | "reviewer" }))}
+            disabled={!liveData}
+          >
+            <option value="owner">Owner</option>
+            <option value="maintainer">Maintainer</option>
+            <option value="reviewer">Reviewer</option>
+          </select>
+        </label>
+        <button className="primary" type="submit" disabled={!liveData || !membershipForm.repositoryId || !membershipForm.userId}>
+          <ShieldCheck size={16} />
+          Assign
+        </button>
+        {membershipStatus ? <span className="policy-status">{membershipStatus}</span> : null}
+      </form>
+      <div className="table-wrap repository-table-wrap">
+        <table className="repository-table">
+          <thead>
+            <tr>
+              <th>Repository</th>
+              <th>Provider</th>
+              <th>Default branch</th>
+              <th>Visibility</th>
+              <th>Review routing</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            <RepositoryRows repositories={repositories} mode={mode} liveData={liveData} onRemoveMembership={onRemoveMembership} />
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function RepositoryRows({
+  repositories,
+  mode,
+  liveData,
+  onRemoveMembership,
+}: {
+  repositories: RepositoryRecord[];
+  mode: LoadMode;
+  liveData: boolean;
+  onRemoveMembership: (repositoryId: string, userId: string) => void;
+}) {
+  if (mode === "loading") {
+    return <RepositoryEmptyRow message="Loading repositories..." />;
+  }
+  if (mode === "error") {
+    return <RepositoryEmptyRow message="Repositories could not be loaded." />;
+  }
+  if (!repositories.length) {
+    return <RepositoryEmptyRow message="No repositories onboarded." />;
+  }
+  return (
+    <>
+      {repositories.map((repository) => (
+        <tr key={repository.id}>
+          <td>{repository.fullName}</td>
+          <td>{repository.provider}</td>
+          <td>{repository.defaultBranch || "-"}</td>
+          <td>{repository.visibility || "-"}</td>
+          <td>
+            <ReviewersCell repository={repository} liveData={liveData} onRemoveMembership={onRemoveMembership} />
+          </td>
+          <td>{repository.createdAt}</td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function ReviewersCell({
+  repository,
+  liveData,
+  onRemoveMembership,
+}: {
+  repository: RepositoryRecord;
+  liveData: boolean;
+  onRemoveMembership: (repositoryId: string, userId: string) => void;
+}) {
+  if (!repository.reviewers.length) {
+    return <>No reviewers assigned</>;
+  }
+  return (
+    <div className="reviewer-list">
+      {repository.reviewers.map((reviewer) => (
+        <span className="reviewer-pill" key={reviewer.userId}>
+          {reviewer.name || reviewer.email} ({reviewer.role})
+          <button type="button" disabled={!liveData} onClick={() => onRemoveMembership(repository.id, reviewer.userId)} aria-label={`Remove ${reviewer.name || reviewer.email} from ${repository.fullName}`}>
+            Remove
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RepositoryEmptyRow({ message }: { message: string }) {
+  return (
+    <tr>
+      <td colSpan={6}>{message}</td>
+    </tr>
+  );
+}
+
+function UserAdmin({
+  users,
+  mode,
+  dataSource,
+  form,
+  status,
+  onFormChange,
+  onCreate,
+  onDelete,
+}: {
+  users: UserRecord[];
+  mode: LoadMode;
+  dataSource: DataSource;
+  form: UserFormState;
+  status: string;
+  onFormChange: React.Dispatch<React.SetStateAction<UserFormState>>;
+  onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
+  onDelete: (userId: string) => void;
+}) {
+  const liveData = dataSource === "api" && mode !== "error";
+  return (
+    <section className="user-panel" id="users" aria-labelledby="user-admin-title">
+      <div className="section-head">
+        <div>
+          <p className="eyebrow">Access</p>
+          <h2 id="user-admin-title">Users</h2>
+          <p>{users.length} organization user(s)</p>
+        </div>
+        <form className="user-create-form" onSubmit={onCreate}>
+          <label>
+            <span>Email</span>
+            <input
+              value={form.email}
+              onChange={(event) => onFormChange((current) => ({ ...current, email: event.target.value }))}
+              disabled={!liveData}
+              placeholder="reviewer@example.com"
+            />
+          </label>
+          <label>
+            <span>Name</span>
+            <input
+              value={form.name}
+              onChange={(event) => onFormChange((current) => ({ ...current, name: event.target.value }))}
+              disabled={!liveData}
+              placeholder="Reviewer"
+            />
+          </label>
+          <label>
+            <span>Org role</span>
+            <select value={form.role} onChange={(event) => onFormChange((current) => ({ ...current, role: event.target.value as "admin" | "reviewer" }))} disabled={!liveData}>
+              <option value="admin">Admin</option>
+              <option value="reviewer">Reviewer</option>
+            </select>
+          </label>
+          <button className="primary" type="submit" disabled={!liveData || !form.email.trim()}>
+            <ShieldCheck size={16} />
+            Add user
+          </button>
+        </form>
+      </div>
+      {status ? <span className="policy-status">{status}</span> : null}
+      <div className="table-wrap user-table-wrap">
+        <table className="user-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Created</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <UserRows users={users} mode={mode} liveData={liveData} onDelete={onDelete} />
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function UserRows({
+  users,
+  mode,
+  liveData,
+  onDelete,
+}: {
+  users: UserRecord[];
+  mode: LoadMode;
+  liveData: boolean;
+  onDelete: (userId: string) => void;
+}) {
+  if (mode === "loading") {
+    return <UserEmptyRow message="Loading users..." />;
+  }
+  if (mode === "error") {
+    return <UserEmptyRow message="Users could not be loaded." />;
+  }
+  if (!users.length) {
+    return <UserEmptyRow message="No users created." />;
+  }
+  return (
+    <>
+      {users.map((user) => (
+        <tr key={user.id}>
+          <td>
+            <strong>{user.name || user.email}</strong>
+            <span className="table-subtext">{user.email}</span>
+          </td>
+          <td>{user.role}</td>
+          <td>{user.createdAt}</td>
+          <td>
+            <button type="button" disabled={!liveData} onClick={() => onDelete(user.id)}>
+              <LogOut size={16} />
+              Remove
+            </button>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function UserEmptyRow({ message }: { message: string }) {
+  return (
+    <tr>
+      <td colSpan={4}>{message}</td>
+    </tr>
+  );
+}
+
 function PolicyEditor({
   policies,
+  repositories,
   form,
   mode,
   dataSource,
@@ -988,6 +1905,7 @@ function PolicyEditor({
   onSave,
 }: {
   policies: PolicyRecord[];
+  repositories: RepositoryRecord[];
   form: PolicyFormState;
   mode: LoadMode;
   dataSource: DataSource;
@@ -995,8 +1913,9 @@ function PolicyEditor({
   onFormChange: React.Dispatch<React.SetStateAction<PolicyFormState>>;
   onSave: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
-  const liveData = dataSource === "api";
+  const liveData = dataSource === "api" && mode !== "error";
   const activePolicy = policies.find((policy) => policy.enabled) ?? policies[0] ?? null;
+  const repositoryOptions = repositories.map((repository) => ({ id: repository.id, label: repository.fullName }));
   const updateRule = (rule: RuleId, enabled: boolean) => {
     onFormChange((current) => ({
       ...current,
@@ -1019,6 +1938,7 @@ function PolicyEditor({
           <div className="policy-meta" aria-label="Current active policy">
             <span className={`status-badge ${activePolicy.enabled ? "active" : "revoked"}`}>{activePolicy.enabled ? "Active" : "Disabled"}</span>
             <strong>{activePolicy.name}</strong>
+            <span>{policyScopeLabel(activePolicy)}</span>
             <span>{activePolicy.updatedAt}</span>
           </div>
         ) : null}
@@ -1034,6 +1954,38 @@ function PolicyEditor({
               disabled={!liveData}
               placeholder="Default review policy"
             />
+          </label>
+          <label>
+            <span>Scope</span>
+            <select
+              value={form.scope}
+              onChange={(event) =>
+                onFormChange((current) => ({
+                  ...current,
+                  scope: event.target.value as "organization" | "repository",
+                  repositoryId: event.target.value === "repository" ? current.repositoryId || repositoryOptions[0]?.id || "" : "",
+                }))
+              }
+              disabled={!liveData}
+            >
+              <option value="organization">Organization</option>
+              <option value="repository">Repository</option>
+            </select>
+          </label>
+          <label>
+            <span>Repository</span>
+            <select
+              value={form.repositoryId}
+              onChange={(event) => onFormChange((current) => ({ ...current, repositoryId: event.target.value }))}
+              disabled={!liveData || form.scope !== "repository" || !repositoryOptions.length}
+            >
+              <option value="">Choose repository</option>
+              {repositoryOptions.map((repository) => (
+                <option value={repository.id} key={repository.id}>
+                  {repository.label}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             <span>Fail level</span>
@@ -1106,7 +2058,7 @@ function PolicyEditor({
             <span>Save as enabled</span>
           </label>
           {status ? <span className="policy-status">{status}</span> : null}
-          <button className="primary" type="submit" disabled={!liveData || mode === "loading"}>
+          <button className="primary" type="submit" disabled={!liveData || mode === "loading" || (form.scope === "repository" && !form.repositoryId)}>
             <ShieldCheck size={16} />
             Save policy
           </button>
@@ -1121,8 +2073,10 @@ function ApiKeyAdmin({
   mode,
   dataSource,
   newApiKeyName,
+  newApiKeyRole,
   createdApiKey,
   onNameChange,
+  onRoleChange,
   onCreate,
   onDismissCreated,
   onRevoke,
@@ -1131,13 +2085,15 @@ function ApiKeyAdmin({
   mode: LoadMode;
   dataSource: DataSource;
   newApiKeyName: string;
+  newApiKeyRole: ApiKeyRole;
   createdApiKey: CreatedApiKey | null;
   onNameChange: (value: string) => void;
+  onRoleChange: (value: ApiKeyRole) => void;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onDismissCreated: () => void;
   onRevoke: (apiKeyId: string) => void;
 }) {
-  const liveData = dataSource === "api";
+  const liveData = dataSource === "api" && mode !== "error";
   return (
     <section className="api-key-panel" id="keys" aria-labelledby="api-key-admin-title">
       <div className="section-head">
@@ -1155,6 +2111,11 @@ function ApiKeyAdmin({
             placeholder="Release bot"
             disabled={!liveData}
           />
+          <select aria-label="New key role" value={newApiKeyRole} onChange={(event) => onRoleChange(event.target.value as ApiKeyRole)} disabled={!liveData}>
+            <option value="admin">Admin</option>
+            <option value="ci">CI</option>
+            <option value="read_only">Read only</option>
+          </select>
           <button className="primary" type="submit" disabled={!liveData || !newApiKeyName.trim()}>
             <KeyRound size={16} />
             Create
@@ -1183,6 +2144,7 @@ function ApiKeyAdmin({
           <thead>
             <tr>
               <th>Name</th>
+              <th>Role</th>
               <th>Prefix</th>
               <th>Created</th>
               <th>Status</th>
@@ -1228,6 +2190,7 @@ function ApiKeyRows({
               {record.name}
               {record.isCurrent ? <span className="current-key-label">Current</span> : null}
             </td>
+            <td>{formatApiKeyRole(record.role)}</td>
             <td>{record.keyPrefix}</td>
             <td>{record.createdAt}</td>
             <td>
@@ -1249,7 +2212,7 @@ function ApiKeyRows({
 function ApiKeyEmptyRow({ message }: { message: string }) {
   return (
     <tr>
-      <td colSpan={5}>{message}</td>
+      <td colSpan={6}>{message}</td>
     </tr>
   );
 }
@@ -1397,14 +2360,14 @@ async function loadAnalysisDetail(
   }
 }
 
-async function fetchWithTimeout(url: string, apiKey: string, init: RequestInit = {}) {
+async function fetchWithTimeout(url: string, apiKey: string, init: RequestInit = {}, timeoutMs = 5000) {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${apiKey}`);
 
   const response = await fetch(url, {
     ...init,
     headers,
-    signal: AbortSignal.timeout(900),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     throw new Error(`API returned ${response.status}`);
@@ -1477,6 +2440,27 @@ function normalizeDetail(detail: ApiDetail): Partial<Analysis> {
   };
 }
 
+function normalizeSubmittedAnalysis(detail: ApiDetail, form: DiffSubmitFormState): Analysis {
+  const partial = normalizeDetail(detail);
+  return {
+    id: detail.analysis_run_id,
+    repo: form.repository.trim() || "local/diff-analysis",
+    prLabel: form.pullRequestNumber.trim() ? `#${form.pullRequestNumber.trim()}` : "api",
+    title: form.title.trim() || `${detail.changed_files.length} file(s) analyzed`,
+    author: form.author.trim() || "dashboard",
+    agent: form.agentName.trim() || "Unknown",
+    branch: form.branch.trim() || "manual",
+    createdAt: formatDate(detail.created_at),
+    riskLevel: detail.risk_level,
+    riskScore: detail.risk_score,
+    changedFileCount: partial.changedFileCount ?? detail.changed_files.length,
+    findingCount: partial.findingCount ?? detail.findings.length,
+    changedFiles: partial.changedFiles ?? [],
+    findings: partial.findings ?? [],
+    report: partial.report ?? detail.markdown,
+  };
+}
+
 function normalizeAuditEvent(event: ApiAuditEvent): AuditEvent {
   return {
     id: event.audit_event_id,
@@ -1493,10 +2477,40 @@ function normalizeApiKey(payload: ApiKeyPayload): ApiKeyRecord {
   return {
     id: payload.api_key_id,
     name: payload.name,
+    role: payload.role,
     keyPrefix: payload.key_prefix,
     createdAt: formatDate(payload.created_at),
     revokedAt: payload.revoked_at ? formatDate(payload.revoked_at) : null,
     isCurrent: payload.is_current,
+  };
+}
+
+function normalizeUser(payload: ApiUserPayload): UserRecord {
+  return {
+    id: payload.user_id,
+    email: payload.email,
+    name: payload.name || "",
+    role: payload.role,
+    createdAt: formatDate(payload.created_at),
+  };
+}
+
+function normalizeRepository(payload: ApiRepositoryPayload): RepositoryRecord {
+  return {
+    id: payload.repository_id,
+    provider: payload.provider,
+    owner: payload.owner,
+    name: payload.name,
+    fullName: payload.full_name,
+    defaultBranch: payload.default_branch || "",
+    visibility: payload.visibility || "",
+    reviewers: payload.reviewers.map((reviewer) => ({
+      userId: reviewer.user_id,
+      email: reviewer.email,
+      name: reviewer.name,
+      role: reviewer.role,
+    })),
+    createdAt: formatDate(payload.created_at),
   };
 }
 
@@ -1505,6 +2519,8 @@ function normalizePolicy(payload: ApiPolicyPayload): PolicyRecord {
     id: payload.policy_id,
     name: payload.name,
     scope: payload.scope,
+    repositoryId: payload.repository_id,
+    repositoryFullName: payload.repository_full_name,
     enabled: payload.enabled,
     config: normalizePolicyConfig(payload.config),
     createdAt: formatDate(payload.created_at),
@@ -1535,6 +2551,8 @@ function policyToForm(policy: PolicyRecord): PolicyFormState {
   return {
     name: policy.name,
     enabled: policy.enabled,
+    scope: policy.scope === "repository" ? "repository" : "organization",
+    repositoryId: policy.repositoryId ?? "",
     failLevel: policy.config.risk.fail_level,
     maxFiles: String(policy.config.risk.large_diff.max_files),
     maxLines: String(policy.config.risk.large_diff.max_lines),
@@ -1544,6 +2562,20 @@ function policyToForm(policy: PolicyRecord): PolicyFormState {
       ...policy.config.rules,
     },
   };
+}
+
+function policyScopeLabel(policy: PolicyRecord) {
+  if (policy.scope === "repository") {
+    return policy.repositoryFullName ? `Repository: ${policy.repositoryFullName}` : "Repository policy";
+  }
+  return "Organization policy";
+}
+
+function formatApiKeyRole(role: ApiKeyRole) {
+  if (role === "read_only") {
+    return "Read only";
+  }
+  return role === "ci" ? "CI" : "Admin";
 }
 
 function policyConfigFromForm(form: PolicyFormState): PolicyConfigPayload | null {
@@ -1577,11 +2609,22 @@ function parsePositiveInteger(value: string) {
   return Number(normalized);
 }
 
+function parseOptionalPositiveInteger(value: string) {
+  if (!value.trim()) {
+    return undefined;
+  }
+  return parsePositiveInteger(value);
+}
+
 function parsePatternLines(value: string) {
   return value
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function compactPayload(payload: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== null && value !== undefined && value !== ""));
 }
 
 function summarizeAuditEvent(action: string, metadata: AuditMetadata) {
@@ -1615,13 +2658,13 @@ function getBanner(mode: LoadMode, dataSource: DataSource) {
     return "Loading workspace data from the AgentReviewOps API...";
   }
   if (mode === "error") {
-    return "Unable to load workspace data. Check the API URL or retry later.";
+    return "Unable to load workspace data. Check the API URL, API key, or retry later.";
   }
   if (mode === "empty") {
     return "No analysis runs or audit events match this workspace yet.";
   }
   if (dataSource === "demo") {
-    return "API unavailable. Showing demo analysis and audit data.";
+    return "No API key configured. Showing demo analysis and audit data.";
   }
   return "";
 }

@@ -1,8 +1,8 @@
 # GitHub Action Usage
 
-AgentReviewOps can run in GitHub Actions by scanning a prepared unified diff, uploading the generated Markdown report as an artifact, and optionally submitting the diff to a self-hosted AgentReviewOps API so it appears in the dashboard.
+AgentReviewOps can run in GitHub Actions by scanning a prepared unified diff, uploading the generated Markdown report as an artifact, optionally submitting the diff to a self-hosted AgentReviewOps API so it appears in the dashboard, and optionally posting or updating a pull request comment.
 
-The project does not yet post PR comments. Keep API keys in GitHub Secrets and pass them through environment variables, not inline command output.
+Keep API keys in GitHub Secrets and pass them through environment variables, not inline command output.
 
 ## Basic PR Workflow
 
@@ -16,6 +16,7 @@ name: AgentReviewOps
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   scan:
@@ -57,6 +58,15 @@ jobs:
             --author "${{ github.actor }}" \
             --branch "${{ github.head_ref }}"
 
+      - name: Comment on pull request
+        run: |
+          agentreview comment-pr \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --report-file agentreview-report.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
       - name: Upload report
         uses: actions/upload-artifact@v4
         with:
@@ -97,8 +107,16 @@ To also submit the analysis to a self-hosted dashboard, pass the optional API in
     title: ${{ github.event.pull_request.title }}
     author: ${{ github.actor }}
     branch: ${{ github.head_ref }}
+    github-comment: "true"
+    github-token: ${{ github.token }}
 ```
+
+## PR Comments
+
+`agentreview comment-pr` posts or updates one AgentReviewOps PR comment using a hidden marker, so repeated workflow runs update the prior comment instead of adding duplicate review packets.
+
+Use `agentreview scan-pr --comment` when you want the CLI to fetch the diff, generate the report, and publish the PR comment in one command.
 
 ## Report Handling
 
-Use `actions/upload-artifact@v4` to retain `agentreview-report.md` for human review. Use `agentreview submit-diff` when you want the same analysis stored in the dashboard. A later GitHub PR integration can add direct PR comments.
+Use `actions/upload-artifact@v4` to retain `agentreview-report.md` for human review. Use `agentreview submit-diff` when you want the same analysis stored in the dashboard.

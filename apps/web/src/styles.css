@@ -221,6 +221,9 @@ nav {
 .section-head p,
 .search span,
 .inline-create-form label,
+.diff-submit-form label span,
+.repository-routing-form label span,
+.user-create-form label span,
 .policy-form label span,
 .rule-grid legend,
 dt {
@@ -243,6 +246,9 @@ dt {
 
 .analysis-list,
 .analysis-detail,
+.diff-submit-panel,
+.repository-panel,
+.user-panel,
 .policy-panel,
 .api-key-panel,
 .audit-panel {
@@ -386,6 +392,9 @@ dt {
   box-shadow: var(--shadow);
 }
 
+.diff-submit-panel,
+.repository-panel,
+.user-panel,
 .policy-panel,
 .api-key-panel,
 .audit-panel {
@@ -411,8 +420,49 @@ dt {
   text-transform: uppercase;
 }
 
-.inline-create-form input {
+.inline-create-form input,
+.inline-create-form select {
   width: 220px;
+  padding: 0 10px;
+}
+
+.repository-create-form {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(140px, 1fr) minmax(160px, 1fr) minmax(130px, 0.8fr) minmax(120px, 0.8fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.repository-routing-form,
+.user-create-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 0.7fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.repository-routing-form {
+  margin: 14px 0;
+}
+
+.repository-create-form label,
+.repository-routing-form label,
+.user-create-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.repository-create-form label span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.repository-create-form input,
+.repository-create-form select,
+.repository-routing-form select,
+.user-create-form input,
+.user-create-form select {
+  width: 100%;
   padding: 0 10px;
 }
 
@@ -431,6 +481,35 @@ dt {
 .policy-form {
   display: grid;
   gap: 14px;
+}
+
+.diff-submit-form {
+  display: grid;
+  gap: 12px;
+}
+
+.diff-submit-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(90px, 0.6fr) repeat(4, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.diff-submit-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.diff-submit-form input,
+.diff-submit-form textarea {
+  width: 100%;
+  padding: 0 10px;
+}
+
+.diff-submit-form textarea {
+  min-height: 180px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .policy-grid,
@@ -602,6 +681,21 @@ table {
   min-width: 780px;
 }
 
+.user-table {
+  min-width: 680px;
+}
+
+.repository-table {
+  min-width: 900px;
+}
+
+.table-subtext {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 th,
 td {
   border-bottom: 1px solid var(--line);
@@ -660,6 +754,29 @@ tr:last-child td {
   flex-wrap: wrap;
   gap: 5px;
   min-width: 220px;
+}
+
+.reviewer-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 260px;
+}
+
+.reviewer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fbfcfa;
+  padding: 4px 5px 4px 9px;
+  white-space: nowrap;
+}
+
+.reviewer-pill button {
+  min-height: 24px;
+  padding: 0 8px;
 }
 
 .metadata-pill {
@@ -726,6 +843,10 @@ pre {
   }
 
   .content-grid,
+  .diff-submit-grid,
+  .repository-create-form,
+  .repository-routing-form,
+  .user-create-form,
   .policy-grid,
   .policy-textareas,
   .rule-grid,
@@ -770,6 +891,13 @@ pre {
   .api-key-form input,
   .inline-create-form,
   .inline-create-form input,
+  .repository-create-form,
+  .repository-routing-form,
+  .user-create-form,
+  .repository-create-form button,
+  .repository-routing-form button,
+  .user-create-form button,
+  .diff-submit-form button,
   .policy-actions,
   .policy-actions button,
   .policy-meta,
@@ -783,6 +911,9 @@ pre {
 
   .one-time-key,
   .inline-create-form,
+  .repository-create-form,
+  .repository-routing-form,
+  .user-create-form,
   .policy-actions,
   .policy-meta,
   .audit-toolbar {

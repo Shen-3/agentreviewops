@@ -8,9 +8,9 @@ Use it when your team uses Cursor, Copilot, Devin, Codex, Claude Code, or other 
 
 ## Current Status
 
-This repository is at the CLI/API/dashboard foundation stage. It provides a Typer-based `agentreview` command that can scan a unified diff or GitHub pull request, apply deterministic risk rules, persist analysis runs and audit events through FastAPI, and manage the self-hosted review control plane from a React dashboard.
+This repository is at the CLI/API/dashboard foundation stage. It provides a Typer-based `agentreview` command that can scan a unified diff or GitHub pull request, apply deterministic risk rules and enabled analyzer plugins, optionally add an AI-authored summary, persist analysis runs and audit events through FastAPI, and manage the self-hosted review control plane from a React dashboard.
 
-GitHub Action usage is documented for artifact-based reports and optional self-hosted dashboard submission. Multi-tenant auth foundations and an offline AI provider interface exist; hosted deployment and real LLM providers are intentionally not implemented yet.
+GitHub Action usage is documented for artifact-based reports, optional self-hosted dashboard submission, and GitHub PR comments. Multi-tenant auth foundations, package-discovered analyzer plugins, and an opt-in OpenAI-compatible AI provider exist; hosted deployment is intentionally not implemented yet.
 
 ## Quick Start
 
@@ -29,6 +29,7 @@ agentreview --help
 agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md
 AGENTREVIEW_API_KEY=<api-key> agentreview submit-diff --diff-file examples/sample.diff --api-url http://127.0.0.1:8000 --repository owner/name --pr 123
 GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --output agentreview-report.md
+GITHUB_TOKEN=<github-token> agentreview comment-pr --repo owner/name --pr 123 --report-file agentreview-report.md
 ```
 
 Expected scan output includes the risk level, positive findings, and the report path.
@@ -36,6 +37,8 @@ Expected scan output includes the risk level, positive findings, and the report 
 `submit-diff` sends a unified diff to a self-hosted AgentReviewOps API and persists the result for the dashboard. The API key is read from `AGENTREVIEW_API_KEY` or `--api-key` and is not printed in command output.
 
 `scan-pr` fetches the pull request diff from the GitHub API using `GITHUB_TOKEN`. The token is required at runtime and is not printed in command output.
+
+`comment-pr` posts or updates the generated report as a GitHub pull request comment using a hidden AgentReviewOps marker, so repeated CI runs update the prior comment rather than creating duplicates.
 
 ## Example Report
 
@@ -52,6 +55,13 @@ Implemented endpoints:
 - `GET /api/api-keys`
 - `POST /api/api-keys`
 - `POST /api/api-keys/{api_key_id}/revoke`
+- `GET /api/users`
+- `POST /api/users`
+- `DELETE /api/users/{user_id}`
+- `GET /api/repositories`
+- `POST /api/repositories`
+- `POST /api/repositories/{repository_id}/memberships`
+- `DELETE /api/repositories/{repository_id}/memberships/{user_id}`
 - `GET /api/audit-events`
 - `GET /api/audit-events/export`
 - `POST /api/retention/purge`
@@ -77,17 +87,33 @@ X-AgentReview-API-Key: <api-key>
 }
 ```
 
-The response includes a persisted analysis run ID scoped to the API key's organization, changed files, findings, risk score, risk level, and Markdown report content. If the organization has an enabled policy, that policy overrides the request-level config for analysis. Use the report endpoint to fetch the stored Markdown report later.
+The response includes a persisted analysis run ID scoped to the API key's organization, changed files, findings, risk score, risk level, and Markdown report content. If the analysis repository matches an onboarded repository with an enabled repository policy, that policy is applied first. Otherwise the latest enabled organization policy overrides the request-level config. Use the report endpoint to fetch the stored Markdown report later.
 
 Save an organization policy with the same schema as `.agentreview.yml`:
 
 ```json
 {
   "name": "Default review policy",
+  "scope": "organization",
   "enabled": true,
   "config": {
     "version": 1,
     "critical_paths": ["auth/**", "payments/**", ".github/workflows/**"]
+  }
+}
+```
+
+Save a repository-scoped policy by first onboarding the repository, then passing its `repository_id`:
+
+```json
+{
+  "name": "Checkout API review policy",
+  "scope": "repository",
+  "repository_id": "<repository-id>",
+  "enabled": true,
+  "config": {
+    "version": 1,
+    "critical_paths": ["auth/**", "payments/**"]
   }
 }
 ```
@@ -112,7 +138,9 @@ agentreview admin bootstrap \
 
 The key is printed once and stored only as a hash. See [self-hosting docs](docs/self-hosting.md) for the current local deployment flow.
 
-Issue additional organization API keys with `POST /api/api-keys`, list existing keys with `GET /api/api-keys`, and revoke inactive keys with `POST /api/api-keys/{api_key_id}/revoke`. Created keys are returned once and are stored only as hashes.
+Issue additional organization API keys with `POST /api/api-keys`, list existing keys with `GET /api/api-keys`, and revoke inactive keys with `POST /api/api-keys/{api_key_id}/revoke`. Created keys are returned once and are stored only as hashes. API key roles are `admin`, `ci`, and `read_only`: admin keys can manage governance settings, CI keys can submit analyses, and read-only keys can inspect existing data.
+
+Create organization users with `POST /api/users`, then assign them to onboarded repositories with `POST /api/repositories/{repository_id}/memberships`. Repository membership roles are `owner`, `maintainer`, and `reviewer`; those assignments are returned in repository list responses and used as reviewer routing metadata during analysis. Remove stale users with `DELETE /api/users/{user_id}` and remove stale reviewer assignments with `DELETE /api/repositories/{repository_id}/memberships/{user_id}`.
 
 For a containerized local stack:
 
@@ -136,7 +164,7 @@ npm run dev
 
 Then open `http://127.0.0.1:5173`.
 
-The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes analysis list, selected analysis detail, risk badges, findings table, report preview, organization policy editor, API key management, audit history with JSON/CSV export, and loading/error/empty states.
+The dashboard can store an API key locally and sends it as a Bearer token for live API data. Without a key, it falls back to seeded demo data. It includes diff submission, analysis list, selected analysis detail, risk badges, findings table, report preview, user management, repository onboarding with reviewer routing assignment, organization and repository policy assignment, role-scoped API key management, audit history with JSON/CSV export, and loading/error/empty states.
 
 ## Sample Config
 
@@ -154,11 +182,30 @@ AI summaries are disabled by default:
 ai:
   enabled: false
   provider: null
+  model: null
+  base_url: null
+  timeout_seconds: 15
+  max_diff_chars: 12000
 ```
 
-The current AI module is a provider abstraction with secret redaction and fake-provider tests. It does not call external LLM APIs.
+Enable AI summaries only when you explicitly want AgentReviewOps to send a redacted diff excerpt and deterministic findings to an external LLM provider. The supported provider values are `openai` and `openai-compatible`; both use a Chat Completions-compatible HTTP endpoint.
 
-Audit events are organization-scoped and available at `GET /api/audit-events`. Export filtered evidence with `GET /api/audit-events/export?format=json` or `format=csv`. AgentReviewOps records summary-only events for bootstrap, API key creation/revocation, policy creation, and analysis creation. See [audit event docs](docs/audit-events.md).
+Required environment:
+
+```bash
+export AGENTREVIEW_OPENAI_API_KEY=<provider-api-key>
+export AGENTREVIEW_OPENAI_MODEL=<model-name>
+```
+
+Optional environment:
+
+```bash
+export AGENTREVIEW_OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+You can also set `ai.model` and `ai.base_url` in `.agentreview.yml`. Secrets are read only from environment variables and are not written to reports.
+
+Audit events are organization-scoped and available at `GET /api/audit-events`. Export filtered evidence with `GET /api/audit-events/export?format=json` or `format=csv`. AgentReviewOps records summary-only events for bootstrap, API key creation/revocation, user creation, repository onboarding, repository membership assignment, policy creation, and analysis creation, including policy source and reviewer routing counts for analyzed repositories. See [audit event docs](docs/audit-events.md).
 
 Retention purges are available at `POST /api/retention/purge`. The endpoint defaults to dry-run mode and requires `confirm=true` for deletion, then records a `retention.purged` audit event with summary counts.
 
@@ -173,12 +220,18 @@ plugins:
     timeout_seconds: 5
 ```
 
-The built-in example plugin demonstrates the contract by flagging dependency manifests. Plugin output is validated as `RiskFinding` data before it can affect risk scoring.
+The built-in example plugin demonstrates the contract by flagging dependency manifests. Enabled plugins are loaded from the built-in registry and installed Python package entry points in the `agentreview.plugins` group. Plugin output is validated as `RiskFinding` data before it can affect risk scoring.
 
-## Roadmap
+Third-party packages can expose analyzer plugins from `pyproject.toml`:
 
-- Add real AI providers behind explicit opt-in configuration.
-- Add plugin discovery/loading from installed packages.
+```toml
+[project.entry-points."agentreview.plugins"]
+my-analyzer = "my_package.plugins:MyAnalyzerPlugin"
+```
+
+## Further Hardening
+
+- Add role update flows for existing users, API keys, and repository reviewer assignments.
 
 ## Security Note
 

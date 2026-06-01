@@ -7,6 +7,11 @@ Current write events:
 - `organization.bootstrapped`
 - `api_key.created`
 - `api_key.revoked`
+- `user.created`
+- `user.deleted`
+- `repository.created`
+- `repository_membership.created`
+- `repository_membership.deleted`
 - `policy.created`
 - `analysis.created`
 - `retention.purged`
@@ -31,6 +36,8 @@ Supported query parameters:
 All audit reads are scoped to the authenticated API key's organization. Normal API keys cannot read global audit events.
 
 Audit metadata is summary-only. It is sanitized before storage and must not contain raw diffs, Markdown reports, API key secrets, key hashes, full policy config, LLM prompts, or LLM outputs.
+
+`api_key.created` metadata records the key name, key role, and source without storing the secret. `analysis.created` metadata records the applied config source (`repository_policy`, `organization_policy`, `request_config`, or `default`), the applied policy ID/name when present, the matched repository ID when present, and reviewer routing counts/roles. `policy.created` metadata records the policy scope and repository name for repository-scoped policies. Repository membership create/delete metadata records the repository, user ID, membership ID, and repository role without storing user email addresses.
 
 Example:
 

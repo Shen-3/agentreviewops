@@ -78,6 +78,10 @@ class RulesConfig(StrictConfigModel):
 class AIConfig(StrictConfigModel):
     enabled: bool = False
     provider: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+    timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    max_diff_chars: int = Field(default=12000, gt=0, le=50000)
 
 
 class PluginConfig(StrictConfigModel):

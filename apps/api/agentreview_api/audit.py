@@ -8,7 +8,12 @@ AUDIT_ACTION_API_KEY_CREATED = "api_key.created"
 AUDIT_ACTION_API_KEY_REVOKED = "api_key.revoked"
 AUDIT_ACTION_ORGANIZATION_BOOTSTRAPPED = "organization.bootstrapped"
 AUDIT_ACTION_POLICY_CREATED = "policy.created"
+AUDIT_ACTION_REPOSITORY_CREATED = "repository.created"
+AUDIT_ACTION_REPOSITORY_MEMBERSHIP_CREATED = "repository_membership.created"
+AUDIT_ACTION_REPOSITORY_MEMBERSHIP_DELETED = "repository_membership.deleted"
 AUDIT_ACTION_RETENTION_PURGED = "retention.purged"
+AUDIT_ACTION_USER_CREATED = "user.created"
+AUDIT_ACTION_USER_DELETED = "user.deleted"
 
 MAX_METADATA_BYTES = 4096
 

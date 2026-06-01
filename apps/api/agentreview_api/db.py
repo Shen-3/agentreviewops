@@ -72,6 +72,7 @@ class RepositoryRecord(Base):
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="repositories")
     memberships: Mapped[list[RepositoryMembershipRecord]] = relationship(back_populates="repository", cascade="all, delete-orphan")
+    policies: Mapped[list[PolicyRecord]] = relationship(back_populates="repository", cascade="all, delete-orphan")
 
 
 class RepositoryMembershipRecord(Base):
@@ -98,6 +99,7 @@ class ApiKeyRecord(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default="admin", nullable=False)
     key_prefix: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -115,6 +117,7 @@ class PolicyRecord(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    repository_id: Mapped[str | None] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     scope: Mapped[str] = mapped_column(String(50), default="organization", nullable=False)
     config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
@@ -131,6 +134,7 @@ class PolicyRecord(Base):
     )
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="policies")
+    repository: Mapped[RepositoryRecord | None] = relationship(back_populates="policies")
 
 
 class AuditEventRecord(Base):

@@ -46,6 +46,14 @@ inputs:
     description: Optional source branch name.
     required: false
     default: ""
+  github-comment:
+    description: Set to true to post or update the generated report as a GitHub pull request comment.
+    required: false
+    default: "false"
+  github-token:
+    description: GitHub token used when github-comment is true. Prefer github.token or a GitHub secret.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -85,3 +93,17 @@ runs:
         if [ -n "$AGENTREVIEW_INPUT_AGENT_NAME" ]; then args+=(--agent-name "$AGENTREVIEW_INPUT_AGENT_NAME"); fi
         if [ -n "$AGENTREVIEW_INPUT_BRANCH" ]; then args+=(--branch "$AGENTREVIEW_INPUT_BRANCH"); fi
         agentreview submit-diff "${args[@]}"
+
+    - name: Comment on GitHub pull request
+      if: ${{ inputs.github-comment == 'true' && inputs.github-token != '' && inputs.repository != '' && inputs.pr-number != '' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        AGENTREVIEW_INPUT_OUTPUT: ${{ inputs.output }}
+        AGENTREVIEW_INPUT_REPOSITORY: ${{ inputs.repository }}
+        AGENTREVIEW_INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        agentreview comment-pr \
+          --repo "$AGENTREVIEW_INPUT_REPOSITORY" \
+          --pr "$AGENTREVIEW_INPUT_PR_NUMBER" \
+          --report-file "$AGENTREVIEW_INPUT_OUTPUT"

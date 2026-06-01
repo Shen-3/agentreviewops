@@ -1,8 +1,16 @@
 from pathlib import Path
+from urllib.parse import urlsplit
 
+from alembic import command
+from alembic.config import Config
+from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from agentreview.cli import app
+from agentreview_api.db import create_session_factory
+from agentreview_api.main import app as api_app
+from agentreview_api.main import get_session
+from agentreview_api.repository import create_api_key, create_organization
 
 
 def test_help_shows_product_name() -> None:
@@ -16,6 +24,7 @@ def test_help_shows_product_name() -> None:
     assert "scan-diff" in result.output
     assert "submit-diff" in result.output
     assert "scan-pr" in result.output
+    assert "comment-pr" in result.output
     assert "--version" in result.output
 
 
@@ -74,6 +83,52 @@ def test_scan_diff_missing_config_uses_defaults(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert output_path.exists()
+
+
+def test_scan_diff_includes_enabled_ai_summary(tmp_path: Path, monkeypatch) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    output_path = tmp_path / "ai-report.md"
+    config_path = tmp_path / "agentreview-ai.yml"
+    config_path.write_text(
+        """
+version: 1
+ai:
+  enabled: true
+  provider: openai
+  model: review-model
+""",
+        encoding="utf-8",
+    )
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"choices": [{"message": {"content": '{"summary":"AI reviewer summary.","checklist":["Inspect auth path."]}'}}]}
+
+    monkeypatch.setenv("AGENTREVIEW_OPENAI_API_KEY", "test-ai-key")
+    monkeypatch.setattr("agentreview.ai.httpx.post", lambda *_args, **_kwargs: Response())
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--config",
+            str(config_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    report = output_path.read_text(encoding="utf-8")
+    assert "## AI Summary" in report
+    assert "AI reviewer summary." in report
+    assert "Inspect auth path." in report
 
 
 def test_submit_diff_posts_to_self_hosted_api(monkeypatch) -> None:
@@ -166,3 +221,70 @@ def test_submit_diff_requires_api_key(monkeypatch) -> None:
 
     assert result.exit_code == 2
     assert "API key required" in result.output
+
+
+def test_submit_diff_persists_analysis_with_api(tmp_path: Path, monkeypatch) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    database_url = f"sqlite:///{tmp_path / 'submit-flow.db'}"
+    monkeypatch.setenv("AGENTREVIEW_DATABASE_URL", database_url)
+
+    alembic_config = Config(str(project_root / "alembic.ini"))
+    command.upgrade(alembic_config, "head")
+
+    session_factory = create_session_factory(database_url)
+    with session_factory() as session:
+        organization = create_organization(session, slug="acme", name="Acme Engineering")
+        _, api_key = create_api_key(session, organization_id=organization.id, name="CI")
+
+    def override_get_session():
+        with session_factory() as session:
+            yield session
+
+    api_app.dependency_overrides[get_session] = override_get_session
+    try:
+        with TestClient(api_app) as api_client:
+            def post_to_testclient(url, *, json, headers, timeout):
+                return api_client.post(urlsplit(url).path, json=json, headers=headers)
+
+            monkeypatch.setenv("AGENTREVIEW_API_KEY", api_key)
+            monkeypatch.setattr("agentreview.cli.httpx.post", post_to_testclient)
+
+            result = runner.invoke(
+                app,
+                [
+                    "submit-diff",
+                    "--diff-file",
+                    str(project_root / "examples" / "sample.diff"),
+                    "--config",
+                    str(project_root / ".agentreview.example.yml"),
+                    "--api-url",
+                    "http://testserver",
+                    "--repository",
+                    "platform/checkout-api",
+                    "--pr",
+                    "1842",
+                    "--title",
+                    "Tighten inactive-user session handling",
+                    "--author",
+                    "codex-agent",
+                    "--agent-name",
+                    "Codex",
+                    "--branch",
+                    "codex/auth-session-hardening",
+                ],
+            )
+
+            assert result.exit_code == 0
+            assert "Submitted analysis run:" in result.output
+            assert "Risk: HIGH 55/100" in result.output
+
+            list_response = api_client.get("/api/analysis-runs", headers={"X-AgentReview-API-Key": api_key})
+            assert list_response.status_code == 200
+            summaries = list_response.json()
+            assert len(summaries) == 1
+            assert summaries[0]["repository"] == "platform/checkout-api"
+            assert summaries[0]["pull_request_number"] == 1842
+            assert summaries[0]["risk_level"] == "high"
+    finally:
+        api_app.dependency_overrides.clear()
