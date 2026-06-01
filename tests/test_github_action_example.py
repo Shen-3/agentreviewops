@@ -25,6 +25,7 @@ def test_ci_workflow_yaml_is_valid() -> None:
     steps = str(workflow["jobs"]["quality"]["steps"])
     assert "astral-sh/setup-uv@v5" in steps
     assert "uv run pytest" in steps
+    assert "pnpm/action-setup@v4" in steps
     assert "pnpm --filter agentreviewops-web build" in steps
 
 
