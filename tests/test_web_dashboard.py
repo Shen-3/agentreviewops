@@ -27,6 +27,9 @@ def test_dashboard_contains_required_views() -> None:
     assert "Policy editor" in app_tsx
     assert "Repository policy" in app_tsx
     assert "Save policy" in app_tsx
+    assert "onToggleEnabled" in app_tsx
+    assert "/api/policies/${policy.id}" in app_tsx
+    assert "policy.updated" in app_tsx
     assert "API keys" in app_tsx
     assert "New key role" in app_tsx
     assert "read_only" in app_tsx

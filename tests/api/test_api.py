@@ -551,12 +551,49 @@ def test_policy_create_list_and_org_override_applies_to_analysis(client: TestCli
     assert analysis_body["risk_level"] == "low"
     assert {finding["rule_id"] for finding in analysis_body["findings"]} == {"missing-docs", "small-focused-diff"}
 
+    update_response = client.patch(
+        f"/api/policies/{policy_body['policy_id']}",
+        json={"enabled": False, "name": "Low-friction docs pilot disabled"},
+    )
+
+    assert update_response.status_code == 200
+    updated_policy = update_response.json()
+    assert updated_policy["policy_id"] == policy_body["policy_id"]
+    assert updated_policy["enabled"] is False
+    assert updated_policy["name"] == "Low-friction docs pilot disabled"
+
+    fallback_analysis_response = client.post(
+        "/api/analyze/diff",
+        json={
+            "diff": diff_text,
+            "config": {
+                "version": 1,
+                "critical_paths": ["auth/**"],
+            },
+        },
+    )
+
+    assert fallback_analysis_response.status_code == 200
+    fallback_analysis_body = fallback_analysis_response.json()
+    assert fallback_analysis_body["risk_level"] == "high"
+    assert "critical-path-change" in {finding["rule_id"] for finding in fallback_analysis_body["findings"]}
+
     audit_response = client.get("/api/audit-events")
-    assert [event["action"] for event in audit_response.json()[:2]] == ["analysis.created", "policy.created"]
+    assert [event["action"] for event in audit_response.json()[:4]] == [
+        "analysis.created",
+        "policy.updated",
+        "analysis.created",
+        "policy.created",
+    ]
+    assert audit_response.json()[1]["metadata"]["previous_enabled"] is True
 
     policy_filter_response = client.get("/api/audit-events", params={"action": "policy.created"})
     assert policy_filter_response.status_code == 200
     assert [event["action"] for event in policy_filter_response.json()] == ["policy.created"]
+
+    policy_update_filter_response = client.get("/api/audit-events", params={"action": "policy.updated"})
+    assert policy_update_filter_response.status_code == 200
+    assert [event["action"] for event in policy_update_filter_response.json()] == ["policy.updated"]
 
 
 def test_repository_scoped_policy_overrides_org_policy_and_records_routing(client: TestClient) -> None:

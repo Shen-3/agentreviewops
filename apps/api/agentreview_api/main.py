@@ -24,6 +24,7 @@ from agentreview_api.audit import (
     AUDIT_ACTION_API_KEY_REVOKED,
     AUDIT_ACTION_API_KEY_UPDATED,
     AUDIT_ACTION_POLICY_CREATED,
+    AUDIT_ACTION_POLICY_UPDATED,
     AUDIT_ACTION_REPOSITORY_CREATED,
     AUDIT_ACTION_REPOSITORY_MEMBERSHIP_CREATED,
     AUDIT_ACTION_REPOSITORY_MEMBERSHIP_DELETED,
@@ -51,6 +52,7 @@ from agentreview_api.repository import (
     get_api_key,
     get_enabled_policy,
     get_enabled_repository_policy,
+    get_policy,
     get_repository,
     get_repository_by_identity,
     get_repository_membership,
@@ -67,6 +69,7 @@ from agentreview_api.repository import (
     to_diff_files,
     to_risk_findings,
     update_api_key,
+    update_policy,
     update_repository_membership,
     update_user,
 )
@@ -238,6 +241,12 @@ class PolicyCreateRequest(BaseModel):
     enabled: bool = True
     scope: str = Field(default="organization", pattern="^(organization|repository)$")
     repository_id: str | None = Field(default=None, description="Required when scope is repository.")
+
+
+class PolicyUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, description="Updated human-readable policy name.")
+    config: AgentReviewConfig | None = None
+    enabled: bool | None = None
 
 
 class PolicyResponse(BaseModel):
@@ -897,6 +906,50 @@ def save_policy(
         ),
     )
     return _policy_response(record)
+
+
+@app.patch("/api/policies/{policy_id}", response_model=PolicyResponse)
+def update_saved_policy(
+    policy_id: str,
+    request: PolicyUpdateRequest,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> PolicyResponse:
+    record = get_policy(session, organization_id=auth.organization_id, policy_id=policy_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    if request.name is None and request.config is None and request.enabled is None:
+        raise HTTPException(status_code=400, detail="At least one policy field is required")
+    if request.name is not None and not request.name.strip():
+        raise HTTPException(status_code=422, detail="Policy name is required")
+
+    previous_enabled = record.enabled
+    updated = update_policy(
+        session,
+        record,
+        name=request.name.strip() if request.name is not None else None,
+        config=request.config,
+        enabled=request.enabled,
+    )
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_POLICY_UPDATED,
+        target_type="policy",
+        target_id=updated.id,
+        metadata=_compact_metadata(
+            {
+                "policy_name": updated.name,
+                "enabled": updated.enabled,
+                "previous_enabled": previous_enabled,
+                "scope": updated.scope,
+                "repository": f"{updated.repository.owner}/{updated.repository.name}" if updated.repository is not None else None,
+            }
+        ),
+    )
+    return _policy_response(updated)
 
 
 @app.post("/api/analyze/diff", response_model=AnalyzeDiffResponse)

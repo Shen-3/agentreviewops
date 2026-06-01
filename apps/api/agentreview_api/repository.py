@@ -370,6 +370,39 @@ def list_policies(session: Session, *, organization_id: str) -> list[PolicyRecor
     return list(session.scalars(statement).all())
 
 
+def get_policy(session: Session, *, organization_id: str, policy_id: str) -> PolicyRecord | None:
+    statement = (
+        select(PolicyRecord)
+        .where(
+            PolicyRecord.organization_id == organization_id,
+            PolicyRecord.id == policy_id,
+        )
+        .options(selectinload(PolicyRecord.repository))
+    )
+    return session.scalar(statement)
+
+
+def update_policy(
+    session: Session,
+    record: PolicyRecord,
+    *,
+    name: str | None = None,
+    config: AgentReviewConfig | None = None,
+    enabled: bool | None = None,
+) -> PolicyRecord:
+    if name is not None:
+        record.name = name
+    if config is not None:
+        record.config_json = config.model_dump(mode="json")
+    if enabled is not None:
+        record.enabled = enabled
+    record.updated_at = datetime.now(timezone.utc)
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
 def get_enabled_policy(session: Session, *, organization_id: str) -> PolicyRecord | None:
     statement = (
         select(PolicyRecord)

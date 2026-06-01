@@ -70,6 +70,7 @@ Implemented endpoints:
 - `POST /api/retention/purge`
 - `GET /api/policies`
 - `POST /api/policies`
+- `PATCH /api/policies/{policy_id}`
 - `POST /api/analyze/diff`
 - `GET /api/analysis-runs`
 - `GET /api/analysis-runs/{analysis_run_id}`
@@ -120,6 +121,8 @@ Save a repository-scoped policy by first onboarding the repository, then passing
   }
 }
 ```
+
+Update a saved policy with `PATCH /api/policies/{policy_id}` to rename it, replace its config, or enable/disable it without deleting audit history. Disabled policies are ignored by future analysis configuration resolution.
 
 Set `AGENTREVIEW_DATABASE_URL` to choose the database. SQLite is supported for local development and tests; production deployments should use a PostgreSQL URL.
 

@@ -16,6 +16,7 @@ Current write events:
 - `repository_membership.deleted`
 - `repository_membership.updated`
 - `policy.created`
+- `policy.updated`
 - `analysis.created`
 - `retention.purged`
 
@@ -40,7 +41,7 @@ All audit reads are scoped to the authenticated API key's organization. Normal A
 
 Audit metadata is summary-only. It is sanitized before storage and must not contain raw diffs, Markdown reports, API key secrets, key hashes, full policy config, LLM prompts, or LLM outputs.
 
-`api_key.created` and `api_key.updated` metadata records the key name, key role, and source or previous role without storing the secret. `analysis.created` metadata records the applied config source (`repository_policy`, `organization_policy`, `request_config`, or `default`), the applied policy ID/name when present, the matched repository ID when present, and reviewer routing counts/roles. `policy.created` metadata records the policy scope and repository name for repository-scoped policies. Repository membership create/update/delete metadata records the repository, user ID, membership ID, and repository role without storing user email addresses.
+`api_key.created` and `api_key.updated` metadata records the key name, key role, and source or previous role without storing the secret. `analysis.created` metadata records the applied config source (`repository_policy`, `organization_policy`, `request_config`, or `default`), the applied policy ID/name when present, the matched repository ID when present, and reviewer routing counts/roles. `policy.created` and `policy.updated` metadata records the policy scope, enabled state, and repository name for repository-scoped policies. Repository membership create/update/delete metadata records the repository, user ID, membership ID, and repository role without storing user email addresses.
 
 Example:
 

@@ -1155,6 +1155,37 @@ function Dashboard() {
       setMode("error");
     }
   };
+  const toggleDashboardPolicy = async (policy: PolicyRecord) => {
+    if (!access.canManageGovernance) {
+      setPolicyStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/policies/${policy.id}`, apiKey, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ enabled: !policy.enabled }),
+      });
+      const updated = normalizePolicy((await response.json()) as ApiPolicyPayload);
+      setPolicies((current) => current.map((record) => (record.id === updated.id ? updated : record)));
+      setPolicyForm(policyToForm(updated));
+      setPolicyStatus(`${updated.name} ${updated.enabled ? "enabled" : "disabled"}.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setAuthContext(null);
+      }
+      setPolicyStatus("Policy could not be updated.");
+      setMode("error");
+    }
+  };
   const exportAuditEvents = async (format: AuditExportFormat) => {
     if (!apiKey || dataSource !== "api") {
       return;
@@ -1421,6 +1452,7 @@ function Dashboard() {
           accessHint={access.governanceHint}
           onFormChange={setPolicyForm}
           onSave={saveDashboardPolicy}
+          onToggleEnabled={(policy) => void toggleDashboardPolicy(policy)}
         />
 
         <ApiKeyAdmin
@@ -2130,6 +2162,7 @@ function PolicyEditor({
   accessHint,
   onFormChange,
   onSave,
+  onToggleEnabled,
 }: {
   policies: PolicyRecord[];
   repositories: RepositoryRecord[];
@@ -2141,6 +2174,7 @@ function PolicyEditor({
   accessHint: string | null;
   onFormChange: React.Dispatch<React.SetStateAction<PolicyFormState>>;
   onSave: (event: React.FormEvent<HTMLFormElement>) => void;
+  onToggleEnabled: (policy: PolicyRecord) => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
   const canEdit = liveData && canManageGovernance;
@@ -2170,6 +2204,9 @@ function PolicyEditor({
             <strong>{activePolicy.name}</strong>
             <span>{policyScopeLabel(activePolicy)}</span>
             <span>{activePolicy.updatedAt}</span>
+            <button type="button" disabled={!canEdit} onClick={() => onToggleEnabled(activePolicy)}>
+              {activePolicy.enabled ? "Disable" : "Enable"}
+            </button>
           </div>
         ) : null}
       </div>
@@ -2936,10 +2973,10 @@ function summarizeAuditEvent(action: string, metadata: AuditMetadata) {
     const riskText = riskLevel ? ` at ${riskLevel}${riskScore ? ` risk (${riskScore})` : " risk"}` : "";
     return `${repository}${pullRequest ? ` #${pullRequest}` : ""} analyzed${riskText}.`;
   }
-  if (action === "policy.created") {
+  if (action === "policy.created" || action === "policy.updated") {
     const policyName = readMetadataText(metadata, "policy_name") || "Policy";
     const enabled = metadata.enabled === false ? "disabled" : "enabled";
-    return `${policyName} saved as ${enabled}.`;
+    return action === "policy.created" ? `${policyName} saved as ${enabled}.` : `${policyName} updated as ${enabled}.`;
   }
   if (action === "api_key.created") {
     return `${readMetadataText(metadata, "api_key_name") || "API key"} created.`;
