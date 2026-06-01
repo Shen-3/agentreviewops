@@ -16,6 +16,8 @@ Then open:
 - API health: `http://127.0.0.1:8000/health`
 - Dashboard: `http://127.0.0.1:8080`
 
+Compose healthchecks gate startup in order: PostgreSQL must be ready before migrations and the API start, and the dashboard waits for the API `/health` endpoint before serving traffic.
+
 In another shell, bootstrap the first organization:
 
 ```bash

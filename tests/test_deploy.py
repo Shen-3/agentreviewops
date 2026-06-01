@@ -13,6 +13,9 @@ def test_docker_compose_defines_self_hosted_stack() -> None:
     assert set(services) == {"postgres", "api", "web"}
     assert services["postgres"]["image"] == "postgres:16-alpine"
     assert services["api"]["environment"]["AGENTREVIEW_DATABASE_URL"].startswith("postgresql+psycopg://")
+    assert "/health" in " ".join(str(part) for part in services["api"]["healthcheck"]["test"])
+    assert services["web"]["depends_on"]["api"]["condition"] == "service_healthy"
+    assert "wget -qO- http://127.0.0.1/" in " ".join(str(part) for part in services["web"]["healthcheck"]["test"])
     assert services["api"]["ports"] == ["8000:8000"]
     assert services["web"]["ports"] == ["8080:80"]
     assert compose["volumes"] == {"postgres-data": None}
