@@ -181,6 +181,55 @@ def test_repository_onboarding_lists_creates_audits_and_blocks_duplicates(client
     }
 
 
+def test_repository_delete_removes_scoped_governance_and_audits(client: TestClient) -> None:
+    create_response = client.post(
+        "/api/repositories",
+        json={
+            "provider": "github",
+            "owner": "platform",
+            "name": "legacy-api",
+        },
+    )
+    assert create_response.status_code == 200
+    repository = create_response.json()
+
+    policy_response = client.post(
+        "/api/policies",
+        json={
+            "name": "Legacy API policy",
+            "scope": "repository",
+            "repository_id": repository["repository_id"],
+            "config": {
+                "version": 1,
+                "critical_paths": ["legacy/**"],
+            },
+        },
+    )
+    assert policy_response.status_code == 200
+
+    delete_response = client.delete(f"/api/repositories/{repository['repository_id']}")
+
+    assert delete_response.status_code == 204
+    assert delete_response.text == ""
+
+    list_response = client.get("/api/repositories")
+    assert list_response.status_code == 200
+    assert "platform/legacy-api" not in {record["full_name"] for record in list_response.json()}
+
+    policy_list_response = client.get("/api/policies")
+    assert policy_list_response.status_code == 200
+    assert policy_response.json()["policy_id"] not in {record["policy_id"] for record in policy_list_response.json()}
+
+    delete_again_response = client.delete(f"/api/repositories/{repository['repository_id']}")
+    assert delete_again_response.status_code == 404
+
+    audit_response = client.get("/api/audit-events", params={"action": "repository.deleted"})
+    assert audit_response.status_code == 200
+    audit_event = audit_response.json()[0]
+    assert audit_event["target_id"] == repository["repository_id"]
+    assert audit_event["metadata"]["repository"] == "platform/legacy-api"
+
+
 def test_user_management_and_repository_membership_assignment(client: TestClient) -> None:
     list_response = client.get("/api/users")
 

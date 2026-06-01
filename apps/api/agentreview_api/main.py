@@ -26,6 +26,7 @@ from agentreview_api.audit import (
     AUDIT_ACTION_POLICY_CREATED,
     AUDIT_ACTION_POLICY_UPDATED,
     AUDIT_ACTION_REPOSITORY_CREATED,
+    AUDIT_ACTION_REPOSITORY_DELETED,
     AUDIT_ACTION_REPOSITORY_MEMBERSHIP_CREATED,
     AUDIT_ACTION_REPOSITORY_MEMBERSHIP_DELETED,
     AUDIT_ACTION_REPOSITORY_MEMBERSHIP_UPDATED,
@@ -47,6 +48,7 @@ from agentreview_api.repository import (
     count_retention_candidates,
     count_admin_users,
     delete_repository_membership,
+    delete_repository,
     delete_user,
     get_analysis_run,
     get_api_key,
@@ -368,6 +370,36 @@ def create_org_repository(
         },
     )
     return _repository_response(record)
+
+
+@app.delete("/api/repositories/{repository_id}", status_code=204)
+def delete_org_repository(
+    repository_id: str,
+    auth: AuthContext = Depends(require_admin_api_key),
+    session: Session = Depends(get_session),
+) -> Response:
+    repository = get_repository(session, organization_id=auth.organization_id, repository_id=repository_id)
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    metadata = {
+        "provider": repository.provider,
+        "owner": repository.owner,
+        "name": repository.name,
+        "repository": f"{repository.owner}/{repository.name}",
+    }
+    delete_repository(session, repository)
+    create_audit_event(
+        session,
+        organization_id=auth.organization_id,
+        actor_type="api_key",
+        actor_id=auth.api_key_id,
+        action=AUDIT_ACTION_REPOSITORY_DELETED,
+        target_type="repository",
+        target_id=repository_id,
+        metadata=metadata,
+    )
+    return Response(status_code=204)
 
 
 @app.post("/api/repositories/{repository_id}/memberships", response_model=RepositoryResponse)

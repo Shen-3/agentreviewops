@@ -838,6 +838,34 @@ function Dashboard() {
       }
     }
   };
+  const deleteDashboardRepository = async (repositoryId: string) => {
+    if (!access.canManageGovernance) {
+      setRepositoryStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    const repository = repositories.find((record) => record.id === repositoryId);
+    try {
+      await fetchWithTimeout(`${API_BASE_URL}/api/repositories/${repositoryId}`, apiKey, {
+        method: "DELETE",
+      });
+      setRepositories((current) => current.filter((record) => record.id !== repositoryId));
+      setRepositoryStatus(`${repository?.fullName ?? "Repository"} removed.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+        setApiKey("");
+        setAuthContext(null);
+        setMode("error");
+        return;
+      }
+      setRepositoryStatus("Repository could not be removed.");
+      setMode("error");
+    }
+  };
   const createDashboardUser = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!access.canManageGovernance) {
@@ -1421,6 +1449,7 @@ function Dashboard() {
           accessHint={access.governanceHint}
           onFormChange={setRepositoryForm}
           onCreate={createDashboardRepository}
+          onDeleteRepository={(repositoryId) => void deleteDashboardRepository(repositoryId)}
           onMembershipFormChange={setMembershipForm}
           onAssignMembership={assignDashboardMembership}
           onRemoveMembership={(repositoryId, userId) => void removeDashboardMembership(repositoryId, userId)}
@@ -1769,6 +1798,7 @@ function RepositoryAdmin({
   accessHint,
   onFormChange,
   onCreate,
+  onDeleteRepository,
   onMembershipFormChange,
   onAssignMembership,
   onRemoveMembership,
@@ -1786,6 +1816,7 @@ function RepositoryAdmin({
   accessHint: string | null;
   onFormChange: React.Dispatch<React.SetStateAction<RepositoryFormState>>;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
+  onDeleteRepository: (repositoryId: string) => void;
   onMembershipFormChange: React.Dispatch<React.SetStateAction<MembershipFormState>>;
   onAssignMembership: (event: React.FormEvent<HTMLFormElement>) => void;
   onRemoveMembership: (repositoryId: string, userId: string) => void;
@@ -1910,10 +1941,18 @@ function RepositoryAdmin({
               <th>Visibility</th>
               <th>Review routing</th>
               <th>Created</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
-            <RepositoryRows repositories={repositories} mode={mode} liveData={canEdit} onRemoveMembership={onRemoveMembership} onUpdateMembershipRole={onUpdateMembershipRole} />
+            <RepositoryRows
+              repositories={repositories}
+              mode={mode}
+              liveData={canEdit}
+              onDeleteRepository={onDeleteRepository}
+              onRemoveMembership={onRemoveMembership}
+              onUpdateMembershipRole={onUpdateMembershipRole}
+            />
           </tbody>
         </table>
       </div>
@@ -1925,12 +1964,14 @@ function RepositoryRows({
   repositories,
   mode,
   liveData,
+  onDeleteRepository,
   onRemoveMembership,
   onUpdateMembershipRole,
 }: {
   repositories: RepositoryRecord[];
   mode: LoadMode;
   liveData: boolean;
+  onDeleteRepository: (repositoryId: string) => void;
   onRemoveMembership: (repositoryId: string, userId: string) => void;
   onUpdateMembershipRole: (repositoryId: string, userId: string, role: "owner" | "maintainer" | "reviewer") => void;
 }) {
@@ -1955,6 +1996,12 @@ function RepositoryRows({
             <ReviewersCell repository={repository} liveData={liveData} onRemoveMembership={onRemoveMembership} onUpdateMembershipRole={onUpdateMembershipRole} />
           </td>
           <td>{repository.createdAt}</td>
+          <td>
+            <button type="button" disabled={!liveData} onClick={() => onDeleteRepository(repository.id)}>
+              <LogOut size={16} />
+              Remove
+            </button>
+          </td>
         </tr>
       ))}
     </>
@@ -2002,7 +2049,7 @@ function ReviewersCell({
 function RepositoryEmptyRow({ message }: { message: string }) {
   return (
     <tr>
-      <td colSpan={6}>{message}</td>
+      <td colSpan={7}>{message}</td>
     </tr>
   );
 }

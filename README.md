@@ -62,6 +62,7 @@ Implemented endpoints:
 - `DELETE /api/users/{user_id}`
 - `GET /api/repositories`
 - `POST /api/repositories`
+- `DELETE /api/repositories/{repository_id}`
 - `POST /api/repositories/{repository_id}/memberships`
 - `PATCH /api/repositories/{repository_id}/memberships/{user_id}`
 - `DELETE /api/repositories/{repository_id}/memberships/{user_id}`
@@ -146,7 +147,7 @@ The key is printed once and stored only as a hash. See [self-hosting docs](docs/
 
 Issue additional organization API keys with `POST /api/api-keys`, list existing keys with `GET /api/api-keys`, update key names or roles with `PATCH /api/api-keys/{api_key_id}`, and revoke inactive keys with `POST /api/api-keys/{api_key_id}/revoke`. Created keys are returned once and are stored only as hashes. API key roles are `admin`, `ci`, and `read_only`: admin keys can manage governance settings, CI keys can submit analyses, and read-only keys can inspect existing data.
 
-Create organization users with `POST /api/users`, update user roles with `PATCH /api/users/{user_id}`, then assign them to onboarded repositories with `POST /api/repositories/{repository_id}/memberships`. Repository membership roles are `owner`, `maintainer`, and `reviewer`; those assignments are returned in repository list responses and used as reviewer routing metadata during analysis. Update reviewer roles with `PATCH /api/repositories/{repository_id}/memberships/{user_id}`. Remove stale users with `DELETE /api/users/{user_id}` and remove stale reviewer assignments with `DELETE /api/repositories/{repository_id}/memberships/{user_id}`.
+Create organization users with `POST /api/users`, update user roles with `PATCH /api/users/{user_id}`, then assign them to onboarded repositories with `POST /api/repositories/{repository_id}/memberships`. Repository membership roles are `owner`, `maintainer`, and `reviewer`; those assignments are returned in repository list responses and used as reviewer routing metadata during analysis. Update reviewer roles with `PATCH /api/repositories/{repository_id}/memberships/{user_id}`. Remove stale users with `DELETE /api/users/{user_id}`, remove stale reviewer assignments with `DELETE /api/repositories/{repository_id}/memberships/{user_id}`, and remove stale onboarded repositories with `DELETE /api/repositories/{repository_id}`.
 
 For a containerized local stack:
 

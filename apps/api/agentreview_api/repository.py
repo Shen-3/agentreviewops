@@ -165,6 +165,11 @@ def list_repositories(session: Session, *, organization_id: str) -> list[Reposit
     return list(session.scalars(statement).all())
 
 
+def delete_repository(session: Session, record: RepositoryRecord) -> None:
+    session.delete(record)
+    session.commit()
+
+
 def create_repository_membership(
     session: Session,
     *,

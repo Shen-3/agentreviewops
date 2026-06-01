@@ -17,6 +17,8 @@ def test_dashboard_contains_required_views() -> None:
     assert "Analyze diff" in app_tsx
     assert "Repositories" in app_tsx
     assert "repositoryForm" in app_tsx
+    assert "deleteDashboardRepository" in app_tsx
+    assert "/api/repositories/${repositoryId}" in app_tsx
     assert "Users" in app_tsx
     assert "userForm" in app_tsx
     assert "Review routing" in app_tsx
