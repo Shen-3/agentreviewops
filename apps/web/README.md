@@ -2,11 +2,11 @@
 
 This is a React + TypeScript + Vite dashboard for analysis runs, organization API keys, and audit events.
 
-Run it locally:
+Run it locally from the repository root:
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm --filter agentreviewops-web dev
 ```
 
 Then open the Vite URL, normally `http://127.0.0.1:5173`.

@@ -14,11 +14,46 @@ GitHub Action usage is documented for artifact-based reports, optional self-host
 
 ## Quick Start
 
+### Docker Compose Quick Start
+
+Docker Compose is the recommended self-hosted path:
+
+```bash
+cp .env.example .env
+docker compose -f deploy/docker-compose.yml up --build
+```
+
+This starts PostgreSQL, the FastAPI API on `http://127.0.0.1:8000`, and the dashboard on `http://127.0.0.1:8080`.
+
+### Local Development
+
+Use `uv` for Python and `pnpm` for the dashboard:
+
+```bash
+uv sync --extra dev
+uv run agentreview --help
+uv run agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md
+uv run pytest
+pnpm install
+pnpm --filter agentreviewops-web dev
+```
+
+Run the API locally in another shell when developing against live dashboard data:
+
+```bash
+export AGENTREVIEW_DATABASE_URL=sqlite:///./agentreview.db
+uv run alembic upgrade head
+uv run uvicorn agentreview_api.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### Legacy/Manual Fallback
+
+The classic editable install remains available if `uv` is not installed:
+
 ```bash
 python -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/agentreview --help
-.venv/bin/agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md
 .venv/bin/pytest
 ```
 
@@ -130,13 +165,13 @@ Set `AGENTREVIEW_DATABASE_URL` to choose the database. SQLite is supported for l
 Run database migrations with:
 
 ```bash
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 Create the first self-hosted organization and one-time API key with:
 
 ```bash
-agentreview admin bootstrap \
+uv run agentreview admin bootstrap \
   --org-slug acme \
   --org-name "Acme Engineering" \
   --email reviewer@example.com \
@@ -164,9 +199,8 @@ A React + TypeScript + Vite dashboard lives in `apps/web`.
 Run it locally:
 
 ```bash
-cd apps/web
-npm install
-npm run dev
+pnpm install
+pnpm --filter agentreviewops-web dev
 ```
 
 Then open `http://127.0.0.1:5173`.

@@ -1,0 +1,16 @@
+{
+  "name": "agentreviewops",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "web:dev": "pnpm --filter agentreviewops-web dev",
+    "web:build": "pnpm --filter agentreviewops-web build",
+    "web:preview": "pnpm --filter agentreviewops-web preview",
+    "py:sync": "uv sync --extra dev",
+    "py:test": "uv run pytest",
+    "py:cli": "uv run agentreview --help",
+    "api:dev": "uv run uvicorn agentreview_api.main:app --reload --host 127.0.0.1 --port 8000",
+    "test": "pnpm run py:test && pnpm run web:build",
+    "build": "pnpm run web:build"
+  }
+}

@@ -39,13 +39,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Install dashboard dependencies
-        working-directory: apps/web
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build dashboard
-        working-directory: apps/web
-        run: npm run build
+        run: pnpm run web:build

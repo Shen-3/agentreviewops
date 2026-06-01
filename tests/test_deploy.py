@@ -35,9 +35,13 @@ def test_web_dockerfile_builds_static_dashboard_with_api_url() -> None:
 
     assert "FROM node:22-alpine AS build" in dockerfile
     assert "ARG VITE_AGENTREVIEW_API_URL=http://127.0.0.1:8000" in dockerfile
-    assert "npm ci" in dockerfile
-    assert "npm run build" in dockerfile
+    assert "RUN corepack enable" in dockerfile
+    assert "COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./" in dockerfile
+    assert "COPY apps/web/package.json apps/web/package.json" in dockerfile
+    assert "pnpm install --frozen-lockfile" in dockerfile
+    assert "pnpm --filter agentreviewops-web build" in dockerfile
     assert "FROM nginx:1.27-alpine" in dockerfile
+    assert "COPY --from=build /app/apps/web/dist /usr/share/nginx/html" in dockerfile
     assert "try_files $uri $uri/ /index.html;" in nginx_conf
     assert "proxy_pass http://api:8000/api/;" in nginx_conf
     assert "proxy_pass http://api:8000/health;" in nginx_conf
@@ -68,5 +72,6 @@ def test_ci_runs_python_tests_and_web_build() -> None:
     web_steps = jobs["web-build"]["steps"]
     assert any(step.get("uses") == "actions/checkout@v6" for step in web_steps)
     assert any(step.get("uses") == "actions/setup-node@v6" for step in web_steps)
-    assert any(step.get("working-directory") == "apps/web" and step.get("run") == "npm ci" for step in web_steps)
-    assert any(step.get("working-directory") == "apps/web" and step.get("run") == "npm run build" for step in web_steps)
+    assert any(step.get("run") == "corepack enable" for step in web_steps)
+    assert any(step.get("run") == "pnpm install --frozen-lockfile" for step in web_steps)
+    assert any(step.get("run") == "pnpm run web:build" for step in web_steps)
