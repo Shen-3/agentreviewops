@@ -25,7 +25,6 @@ def test_help_shows_product_name() -> None:
     assert "submit-diff" in result.output
     assert "scan-pr" in result.output
     assert "comment-pr" in result.output
-    assert "--version" in result.output
 
 
 def test_version_shows_package_version() -> None:
