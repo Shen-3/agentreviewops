@@ -78,27 +78,40 @@ jobs:
 
 This repository also includes a local composite action at `examples/github-action/action.yml`.
 
-After checking out the repository and preparing `agentreview.diff`, call it with artifact-only output:
+In a consuming repository, set up Python first, check out the repository you want to scan, prepare `agentreview.diff`, then call the action with artifact-only output:
 
 ```yaml
+- name: Set up Python
+  uses: actions/setup-python@v5
+  with:
+    python-version: "3.12"
+
+- name: Check out repository
+  uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+
+- name: Build PR diff
+  run: git diff --unified=0 "origin/${{ github.base_ref }}" HEAD > agentreview.diff
+
 - name: Run AgentReviewOps composite action
-  uses: ./examples/github-action
+  uses: Shen-3/agentreviewops/examples/github-action@main
   with:
     diff-file: agentreview.diff
-    config: .agentreview.example.yml
+    config: .agentreview.yml
     output: agentreview-report.md
 ```
 
-The composite action installs AgentReviewOps from the checked-out repository and runs `agentreview scan-diff`.
+The composite action installs AgentReviewOps from its own `$GITHUB_ACTION_PATH`, not from the consuming repository, then runs `agentreview scan-diff`.
 
 To also submit the analysis to a self-hosted dashboard, pass the optional API inputs:
 
 ```yaml
 - name: Run AgentReviewOps composite action
-  uses: ./examples/github-action
+  uses: Shen-3/agentreviewops/examples/github-action@main
   with:
     diff-file: agentreview.diff
-    config: .agentreview.example.yml
+    config: .agentreview.yml
     output: agentreview-report.md
     api-url: ${{ vars.AGENTREVIEW_API_URL }}
     api-key: ${{ secrets.AGENTREVIEW_API_KEY }}

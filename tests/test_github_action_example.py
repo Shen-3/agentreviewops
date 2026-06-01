@@ -26,6 +26,7 @@ def test_composite_action_yaml_is_valid() -> None:
     assert "api-key" in action["inputs"]
     assert "github-comment" in action["inputs"]
     assert "github-token" in action["inputs"]
+    assert 'python -m pip install -e "$GITHUB_ACTION_PATH"' in str(action["runs"]["steps"])
     assert "agentreview submit-diff" in str(action["runs"]["steps"])
     assert "agentreview comment-pr" in str(action["runs"]["steps"])
 
@@ -36,5 +37,7 @@ def test_github_action_docs_explain_artifact_flow() -> None:
     assert "agentreview scan-diff" in docs
     assert "agentreview submit-diff" in docs
     assert "agentreview comment-pr" in docs
+    assert "Shen-3/agentreviewops/examples/github-action@main" in docs
+    assert "$GITHUB_ACTION_PATH" in docs
     assert "actions/upload-artifact@v4" in docs
     assert "pull-requests: write" in docs

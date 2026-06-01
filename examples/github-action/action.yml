@@ -58,9 +58,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install AgentReviewOps from checkout
+    - name: Install AgentReviewOps from action
       shell: bash
-      run: python -m pip install -e "."
+      run: python -m pip install -e "$GITHUB_ACTION_PATH"
 
     - name: Run AgentReviewOps scan
       shell: bash
