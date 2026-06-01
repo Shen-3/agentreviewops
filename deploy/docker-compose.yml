@@ -41,7 +41,7 @@ services:
       context: ..
       dockerfile: deploy/web.Dockerfile
       args:
-        VITE_AGENTREVIEW_API_URL: http://127.0.0.1:8000
+        VITE_AGENTREVIEW_API_URL: ""
     depends_on:
       api:
         condition: service_healthy

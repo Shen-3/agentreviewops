@@ -15,6 +15,7 @@ def test_docker_compose_defines_self_hosted_stack() -> None:
     assert services["api"]["environment"]["AGENTREVIEW_DATABASE_URL"].startswith("postgresql+psycopg://")
     assert "/health" in " ".join(str(part) for part in services["api"]["healthcheck"]["test"])
     assert services["web"]["depends_on"]["api"]["condition"] == "service_healthy"
+    assert services["web"]["build"]["args"]["VITE_AGENTREVIEW_API_URL"] == ""
     assert "wget -qO- http://127.0.0.1/" in " ".join(str(part) for part in services["web"]["healthcheck"]["test"])
     assert services["api"]["ports"] == ["8000:8000"]
     assert services["web"]["ports"] == ["8080:80"]
@@ -38,6 +39,8 @@ def test_web_dockerfile_builds_static_dashboard_with_api_url() -> None:
     assert "npm run build" in dockerfile
     assert "FROM nginx:1.27-alpine" in dockerfile
     assert "try_files $uri $uri/ /index.html;" in nginx_conf
+    assert "proxy_pass http://api:8000/api/;" in nginx_conf
+    assert "proxy_pass http://api:8000/health;" in nginx_conf
 
 
 def test_dockerignore_excludes_heavy_and_secret_local_files() -> None:

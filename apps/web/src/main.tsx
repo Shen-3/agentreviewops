@@ -272,7 +272,7 @@ type ApiPolicyPayload = {
   updated_at: string;
 };
 
-const API_BASE_URL = import.meta.env.VITE_AGENTREVIEW_API_URL || "http://127.0.0.1:8000";
+const API_BASE_URL = import.meta.env.VITE_AGENTREVIEW_API_URL ?? "http://127.0.0.1:8000";
 const API_KEY_STORAGE_KEY = "agentreviewops.apiKey";
 const ruleLabels: Record<RuleId, string> = {
   require_tests_for_code_changes: "Require tests for code changes",
