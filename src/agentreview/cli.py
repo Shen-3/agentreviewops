@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from pathlib import Path
 import os
 
@@ -20,6 +21,22 @@ app = typer.Typer(
 )
 admin_app = typer.Typer(help="Administrative commands for self-hosted AgentReviewOps.")
 app.add_typer(admin_app, name="admin")
+
+
+class FailOnLevel(str, Enum):
+    NEVER = "never"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    BLOCK = "block"
+
+
+RISK_LEVEL_ORDER = {
+    "low": 0,
+    "medium": 1,
+    "high": 2,
+    "block": 3,
+}
 
 
 def version_callback(value: bool | None) -> None:
@@ -131,6 +148,11 @@ def scan_diff(
         dir_okay=False,
         help="Path where the Markdown report will be written.",
     ),
+    fail_on: FailOnLevel = typer.Option(
+        FailOnLevel.NEVER,
+        "--fail-on",
+        help="Exit with code 1 when risk is at or above this level.",
+    ),
 ) -> None:
     """Analyze a unified diff and write a Markdown review report."""
     try:
@@ -172,6 +194,7 @@ def scan_diff(
         typer.echo("- INFO none: no positive risk findings")
     typer.echo("")
     typer.echo(f"Report written to: {output}")
+    _enforce_fail_on(result.analysis.risk_level, result.analysis.risk_score, fail_on)
 
 
 @app.command("submit-diff")
@@ -300,6 +323,11 @@ def scan_pr(
         dir_okay=False,
         help="Path where the Markdown report will be written.",
     ),
+    fail_on: FailOnLevel = typer.Option(
+        FailOnLevel.NEVER,
+        "--fail-on",
+        help="Exit with code 1 when risk is at or above this level.",
+    ),
     comment: bool = typer.Option(
         False,
         "--comment/--no-comment",
@@ -356,6 +384,7 @@ def scan_pr(
             typer.echo(f"GitHub error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
         typer.echo(f"GitHub comment: {comment_url}")
+    _enforce_fail_on(result.analysis.risk_level, result.analysis.risk_score, fail_on)
 
 
 @app.command("comment-pr")
@@ -413,6 +442,22 @@ def _response_error_detail(response: httpx.Response) -> str:
         return f"{response.status_code} {response.reason_phrase}"
     detail = body.get("detail") if isinstance(body, dict) else None
     return f"{response.status_code} {detail or response.reason_phrase}"
+
+
+def _enforce_fail_on(risk_level: str, risk_score: int, fail_on: FailOnLevel) -> None:
+    if fail_on == FailOnLevel.NEVER:
+        return
+    if RISK_LEVEL_ORDER[risk_level] < RISK_LEVEL_ORDER[fail_on.value]:
+        return
+
+    typer.echo(
+        (
+            "CI gate failed: "
+            f"risk {risk_level.upper()} ({risk_score}/100) meets --fail-on {fail_on.value} threshold."
+        ),
+        err=True,
+    )
+    raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

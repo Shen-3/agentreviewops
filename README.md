@@ -1,22 +1,63 @@
 # AgentReviewOps
 
-AgentReviewOps is an open-source quality gate for AI-generated pull requests.
+AgentReviewOps is a policy-as-code risk gate for AI-generated pull requests. It classifies risky changes, routes or requires human review, comments on PRs, and preserves audit evidence before merge.
 
-It will analyze pull request diffs, detect high-risk changes, check whether tests were updated, apply policy-as-code, and generate a human review packet before merge.
+Use it when your team uses Cursor, Copilot, Devin, Codex, Claude Code, or other coding agents and needs deterministic governance before merge.
 
-Use it when your team uses Cursor, Copilot, Devin, Codex, Claude Code, or other coding agents and needs a repeatable way to decide what requires human attention.
+## Recommended GitHub Action Usage
+
+```yaml
+name: AgentReviewOps
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: Shen-3/agentreviewops@main
+        with:
+          github-token: ${{ github.token }}
+          config: .agentreview.yml
+          comment: "true"
+          fail-on: high
+```
+
+`fail-on` controls the CI threshold. For example, `fail-on: high` exits non-zero for `high` or `block` risk after the Markdown report and optional PR comment are produced.
 
 ## Current Status
 
 This repository is at the CLI/API/dashboard foundation stage. It provides a Typer-based `agentreview` command that can scan a unified diff or GitHub pull request, apply deterministic risk rules and enabled analyzer plugins, optionally add an AI-authored summary, persist analysis runs and audit events through FastAPI, and manage the self-hosted review control plane from a React dashboard.
 
-GitHub Action usage is documented for artifact-based reports, optional self-hosted dashboard submission, and GitHub PR comments. Multi-tenant auth foundations, package-discovered analyzer plugins, and an opt-in OpenAI-compatible AI provider exist; hosted deployment is intentionally not implemented yet.
+GitHub Action usage is the primary entrypoint for PR quality gates. Self-hosted API/dashboard submission, artifact-based reports, and GitHub PR comments are supported. Multi-tenant auth foundations, package-discovered analyzer plugins, and an opt-in OpenAI-compatible AI provider exist; hosted deployment is intentionally not implemented yet.
 
 ## Quick Start
 
-### Docker Compose Quick Start
+### Local CLI
 
-Docker Compose is the recommended self-hosted path:
+Use `uv` for Python and `pnpm` for the dashboard:
+
+```bash
+uv sync --extra dev
+uv run agentreview --help
+uv run agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md --fail-on never
+uv run pytest
+pnpm install
+pnpm --filter agentreviewops-web dev
+```
+
+### Docker Compose Self-Hosting
+
+Docker Compose remains the recommended self-hosted API/dashboard path:
 
 ```bash
 cp .env.example .env
@@ -24,19 +65,6 @@ docker compose -f deploy/docker-compose.yml up --build
 ```
 
 This starts PostgreSQL, the FastAPI API on `http://127.0.0.1:8000`, and the dashboard on `http://127.0.0.1:8080`.
-
-### Local Development
-
-Use `uv` for Python and `pnpm` for the dashboard:
-
-```bash
-uv sync --extra dev
-uv run agentreview --help
-uv run agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md
-uv run pytest
-pnpm install
-pnpm --filter agentreviewops-web dev
-```
 
 Run the API locally in another shell when developing against live dashboard data:
 
@@ -61,13 +89,15 @@ python -m venv .venv
 
 ```bash
 agentreview --help
-agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md
+agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md --fail-on high
 AGENTREVIEW_API_KEY=<api-key> agentreview submit-diff --diff-file examples/sample.diff --api-url http://127.0.0.1:8000 --repository owner/name --pr 123
-GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --output agentreview-report.md
+GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --output agentreview-report.md --fail-on high
 GITHUB_TOKEN=<github-token> agentreview comment-pr --repo owner/name --pr 123 --report-file agentreview-report.md
 ```
 
 Expected scan output includes the risk level, positive findings, and the report path.
+
+`--fail-on low|medium|high|block|never` controls whether scan commands fail CI after writing the report. The default is `never` for backward compatibility.
 
 `submit-diff` sends a unified diff to a self-hosted AgentReviewOps API and persists the result for the dashboard. The API key is read from `AGENTREVIEW_API_KEY` or `--api-key` and is not printed in command output.
 

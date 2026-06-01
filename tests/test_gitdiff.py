@@ -96,6 +96,24 @@ index 2222222..0000000
     assert changed_files[1].deletions == 2
 
 
+def test_added_lines_preserve_content_and_new_line_numbers() -> None:
+    diff_text = """diff --git a/src/example.py b/src/example.py
+index 1111111..2222222 100644
+--- a/src/example.py
++++ b/src/example.py
+@@ -10,2 +10,3 @@
+ value = 1
++enabled = True
+ return value
+"""
+
+    changed_files = parse_unified_diff(diff_text)
+
+    assert changed_files[0].additions == 1
+    assert changed_files[0].added_lines[0].content == "enabled = True"
+    assert changed_files[0].added_lines[0].line_number == 11
+
+
 def test_detect_language_uses_common_extensions_and_filenames() -> None:
     assert detect_language("src/app.py") == "python"
     assert detect_language("Dockerfile") == "dockerfile"

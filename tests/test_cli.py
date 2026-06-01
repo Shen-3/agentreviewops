@@ -84,6 +84,171 @@ def test_scan_diff_missing_config_uses_defaults(tmp_path: Path) -> None:
     assert output_path.exists()
 
 
+def test_scan_diff_fail_on_never_does_not_fail_on_high(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--fail-on",
+            "never",
+            "--output",
+            str(tmp_path / "report.md"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Risk: HIGH 55/100" in result.output
+    assert "CI gate failed" not in result.output
+
+
+def test_scan_diff_fail_on_block_fails_only_on_block(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    block_diff = _write_diff(tmp_path, "block.diff", _block_risk_diff())
+
+    high_result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--fail-on",
+            "block",
+            "--output",
+            str(tmp_path / "high-report.md"),
+        ],
+    )
+    block_result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(block_diff),
+            "--fail-on",
+            "block",
+            "--output",
+            str(tmp_path / "block-report.md"),
+        ],
+    )
+
+    assert high_result.exit_code == 0
+    assert block_result.exit_code == 1
+    assert "CI gate failed: risk BLOCK" in block_result.output
+
+
+def test_scan_diff_fail_on_high_fails_on_high_and_block(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    block_diff = _write_diff(tmp_path, "block.diff", _block_risk_diff())
+
+    high_result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--fail-on",
+            "high",
+            "--output",
+            str(tmp_path / "high-report.md"),
+        ],
+    )
+    block_result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(block_diff),
+            "--fail-on",
+            "high",
+            "--output",
+            str(tmp_path / "block-report.md"),
+        ],
+    )
+
+    assert high_result.exit_code == 1
+    assert block_result.exit_code == 1
+    assert "meets --fail-on high threshold" in high_result.output
+    assert "meets --fail-on high threshold" in block_result.output
+
+
+def test_scan_diff_fail_on_medium_fails_on_medium_high_and_block(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    medium_diff = _write_diff(tmp_path, "medium.diff", _medium_risk_diff())
+    block_diff = _write_diff(tmp_path, "block.diff", _block_risk_diff())
+
+    medium_result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(medium_diff),
+            "--fail-on",
+            "medium",
+            "--output",
+            str(tmp_path / "medium-report.md"),
+        ],
+    )
+    high_result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--fail-on",
+            "medium",
+            "--output",
+            str(tmp_path / "high-report.md"),
+        ],
+    )
+    block_result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(block_diff),
+            "--fail-on",
+            "medium",
+            "--output",
+            str(tmp_path / "block-report.md"),
+        ],
+    )
+
+    assert medium_result.exit_code == 1
+    assert high_result.exit_code == 1
+    assert block_result.exit_code == 1
+    assert "Risk: MEDIUM" in medium_result.output
+    assert "Risk: HIGH" in high_result.output
+    assert "Risk: BLOCK" in block_result.output
+
+
+def test_scan_diff_invalid_fail_on_is_rejected_by_typer(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--fail-on",
+            "critical",
+            "--output",
+            str(tmp_path / "report.md"),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "critical" in result.output
+
+
 def test_scan_diff_includes_enabled_ai_summary(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     project_root = Path(__file__).parents[1]
@@ -287,3 +452,38 @@ def test_submit_diff_persists_analysis_with_api(tmp_path: Path, monkeypatch) -> 
             assert summaries[0]["risk_level"] == "high"
     finally:
         api_app.dependency_overrides.clear()
+
+
+def _write_diff(tmp_path: Path, name: str, diff_text: str) -> Path:
+    diff_path = tmp_path / name
+    diff_path.write_text(diff_text, encoding="utf-8")
+    return diff_path
+
+
+def _medium_risk_diff() -> str:
+    return """diff --git a/pyproject.toml b/pyproject.toml
+index 1111111..2222222 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1 +1,3 @@
+ [project]
++dependencies = ["httpx"]
++requires-python = ">=3.12"
+"""
+
+
+def _block_risk_diff() -> str:
+    return """diff --git a/.github/workflows/agentreview.yml b/.github/workflows/agentreview.yml
+index 1111111..2222222 100644
+--- a/.github/workflows/agentreview.yml
++++ b/.github/workflows/agentreview.yml
+@@ -1 +1,8 @@
+ name: AgentReviewOps
++permissions: write-all
++on:
++  pull_request_target:
++jobs:
++  scan:
++    steps:
++      - uses: actions/checkout@main
+"""

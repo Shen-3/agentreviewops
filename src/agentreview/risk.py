@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
+import re
 
-from agentreview.models import AgentReviewConfig, DiffFile, RiskAnalysis, RiskFinding, RiskLevel
+from agentreview.models import AddedDiffLine, AgentReviewConfig, DiffFile, RiskAnalysis, RiskFinding, RiskLevel
 
 CODE_LANGUAGES = {
     "go",
@@ -61,6 +62,16 @@ MIGRATION_PATTERNS = [
     "**/migrations/**",
     "**/*migration*",
 ]
+
+GITHUB_WORKFLOW_PATTERNS = [
+    ".github/workflows/**",
+]
+
+WRITE_ALL_PERMISSIONS_RE = re.compile(r"^\s*permissions\s*:\s*['\"]?write-all['\"]?\s*(?:#.*)?$", re.IGNORECASE)
+GITHUB_ACTION_USES_RE = re.compile(r"^\s*(?:-\s*)?uses\s*:\s*(?P<action>[^#\s]+)")
+PYTHON_SUBPROCESS_SHELL_TRUE_RE = re.compile(r"\bshell\s*=\s*True\b")
+PYTHON_EVAL_EXEC_RE = re.compile(r"(?<![\w.])(?:eval|exec)\s*\(")
+PYTHON_UNSAFE_YAML_LOAD_RE = re.compile(r"(?<![\w.])yaml\.load\s*\(")
 
 
 def analyze_risk(
@@ -173,6 +184,162 @@ def _add_file_findings(
                     file_path=changed_file.path,
                 )
             )
+
+        _add_added_line_findings(changed_file, findings)
+
+
+def _add_added_line_findings(changed_file: DiffFile, findings: list[RiskFinding]) -> None:
+    if not changed_file.added_lines:
+        return
+
+    paths = _paths_for_file(changed_file)
+    if _matches_any(paths, GITHUB_WORKFLOW_PATTERNS):
+        _add_github_actions_findings(changed_file, findings)
+
+    if changed_file.language == "python":
+        _add_python_dangerous_pattern_findings(changed_file, findings)
+
+
+def _add_github_actions_findings(changed_file: DiffFile, findings: list[RiskFinding]) -> None:
+    for added_line in _actionable_added_lines(changed_file.added_lines, comment_prefix="#"):
+        line = added_line.content
+        if WRITE_ALL_PERMISSIONS_RE.search(line):
+            findings.append(
+                _line_finding(
+                    rule_id="github-actions-write-all-permissions",
+                    severity="high",
+                    title="GitHub Actions workflow grants write-all permissions",
+                    description="The workflow grants broad write-all token permissions.",
+                    score_delta=20,
+                    file_path=changed_file.path,
+                    added_line=added_line,
+                )
+            )
+
+        if "pull_request_target" in line:
+            findings.append(
+                _line_finding(
+                    rule_id="github-actions-pull-request-target",
+                    severity="high",
+                    title="GitHub Actions workflow uses pull_request_target",
+                    description="pull_request_target runs with elevated repository context and requires careful review.",
+                    score_delta=20,
+                    file_path=changed_file.path,
+                    added_line=added_line,
+                )
+            )
+
+        action_ref = _extract_github_action_reference(line)
+        if action_ref is not None and _is_unpinned_or_moving_action_ref(action_ref):
+            findings.append(
+                _line_finding(
+                    rule_id="github-actions-unpinned-action",
+                    severity="medium",
+                    title="GitHub Actions step uses an unpinned or moving action reference",
+                    description="The workflow references an external action without a stable tag or commit SHA.",
+                    score_delta=15,
+                    file_path=changed_file.path,
+                    added_line=added_line,
+                    evidence_extra={"action": action_ref},
+                )
+            )
+
+
+def _add_python_dangerous_pattern_findings(changed_file: DiffFile, findings: list[RiskFinding]) -> None:
+    for added_line in _actionable_added_lines(changed_file.added_lines, comment_prefix="#"):
+        line = added_line.content
+        if PYTHON_SUBPROCESS_SHELL_TRUE_RE.search(line):
+            findings.append(
+                _line_finding(
+                    rule_id="python-subprocess-shell-true",
+                    severity="high",
+                    title="Python subprocess call enables shell=True",
+                    description="shell=True can execute shell metacharacters when inputs are not tightly controlled.",
+                    score_delta=20,
+                    file_path=changed_file.path,
+                    added_line=added_line,
+                )
+            )
+
+        if PYTHON_EVAL_EXEC_RE.search(line):
+            findings.append(
+                _line_finding(
+                    rule_id="python-eval-exec",
+                    severity="high",
+                    title="Python eval or exec added",
+                    description="eval and exec can execute attacker-controlled code if inputs are not trusted.",
+                    score_delta=20,
+                    file_path=changed_file.path,
+                    added_line=added_line,
+                )
+            )
+
+        if PYTHON_UNSAFE_YAML_LOAD_RE.search(line) and "SafeLoader" not in line:
+            findings.append(
+                _line_finding(
+                    rule_id="python-unsafe-yaml-load",
+                    severity="high",
+                    title="Python yaml.load without SafeLoader added",
+                    description="yaml.load without SafeLoader can construct unsafe Python objects from untrusted YAML.",
+                    score_delta=20,
+                    file_path=changed_file.path,
+                    added_line=added_line,
+                )
+            )
+
+
+def _actionable_added_lines(added_lines: list[AddedDiffLine], *, comment_prefix: str) -> list[AddedDiffLine]:
+    return [
+        added_line
+        for added_line in added_lines
+        if added_line.content.strip() and not added_line.content.lstrip().startswith(comment_prefix)
+    ]
+
+
+def _line_finding(
+    *,
+    rule_id: str,
+    severity: str,
+    title: str,
+    description: str,
+    score_delta: int,
+    file_path: str,
+    added_line: AddedDiffLine,
+    evidence_extra: dict | None = None,
+) -> RiskFinding:
+    evidence = {"line": added_line.content.strip()}
+    if added_line.line_number is not None:
+        evidence["line_number"] = added_line.line_number
+    if evidence_extra:
+        evidence.update(evidence_extra)
+    return RiskFinding(
+        rule_id=rule_id,
+        severity=severity,
+        title=title,
+        description=description,
+        score_delta=score_delta,
+        file_path=file_path,
+        line_start=added_line.line_number,
+        line_end=added_line.line_number,
+        evidence=evidence,
+    )
+
+
+def _extract_github_action_reference(line: str) -> str | None:
+    match = GITHUB_ACTION_USES_RE.search(line)
+    if match is None:
+        return None
+    action_ref = match.group("action").strip("'\"")
+    if action_ref.startswith(("./", "../", "docker://")):
+        return None
+    return action_ref
+
+
+def _is_unpinned_or_moving_action_ref(action_ref: str) -> bool:
+    if "@" not in action_ref:
+        return True
+    ref = action_ref.rsplit("@", maxsplit=1)[1].lower()
+    return ref in {"main", "master", "latest"}
 
 
 def _add_change_set_findings(

@@ -1,33 +1,33 @@
-# AgentReviewOps Report
+# AgentReviewOps Report: HIGH risk (55/100)
 
-Risk: HIGH (55/100)
+## Merge recommendation
 
-## Summary
+Human review required before merge.
 
-1 file(s) changed with 4 positive risk finding(s). Review the HIGH risk areas before merge.
+## Why this requires attention
 
-## Findings
+1 file(s) changed with 4 positive risk finding(s). The highest deterministic finding severity is HIGH; review the listed risk areas before merge.
 
-| Severity | Rule | File | Reason |
-|---|---|---|---|
-| HIGH | critical-path-change | auth/session.py | auth/session.py matches a configured critical path. Score +20. |
-| HIGH | sensitive-area-change | auth/session.py | auth/session.py is in auth, security, or payments code. Score +20. |
-| MEDIUM | missing-tests | Change set | At least one source file changed, but no test files changed. Score +15. |
-| LOW | missing-docs | Change set | Source files changed without accompanying documentation updates. Score +5. |
-| INFO | small-focused-diff | Change set | Only one file changed and the diff is within the small-change threshold. Score -5. |
+## Findings table
 
-## Human Review Checklist
+| Severity | Rule | Score | File | Reason |
+|---|---|---:|---|---|
+| HIGH | critical-path-change | +20 | auth/session.py | auth/session.py matches a configured critical path. |
+| HIGH | sensitive-area-change | +20 | auth/session.py | auth/session.py is in auth, security, or payments code. |
+| MEDIUM | missing-tests | +15 | Change set | At least one source file changed, but no test files changed. |
+| LOW | missing-docs | +5 | Change set | Source files changed without accompanying documentation updates. |
+| INFO | small-focused-diff | -5 | Change set | Only one file changed and the diff is within the small-change threshold. |
 
-- [ ] Verify critical-path changes are intentional and scoped.
-- [ ] Review auth, security, or payments behavior with a human owner.
-- [ ] Require tests for changed behavior or document why tests are not needed.
-- [ ] Confirm whether behavior changes require documentation updates.
-
-## Changed Files
+## Changed files summary
 
 | File | Status | + | - | Critical | Test |
 |---|---|---:|---:|---|---|
 | auth/session.py | modified | 3 | 1 | yes | no |
+
+## Suggested human review checklist
+
+- [ ] Verify adequate tests were added, or document why tests are not required.
+- [ ] Get security or code owner review for the sensitive or critical-path changes.
 
 ## Policy Config Used
 

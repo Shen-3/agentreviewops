@@ -191,6 +191,38 @@ def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Pat
     assert output_path.exists()
 
 
+def test_scan_pr_fail_on_high_exits_after_writing_report(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    output_path = tmp_path / "pr-report.md"
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        "agentreview.cli.fetch_pull_request_diff",
+        lambda **_kwargs: (project_root / "examples" / "sample.diff").read_text(encoding="utf-8"),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-pr",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--output",
+            str(output_path),
+            "--fail-on",
+            "high",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "GitHub PR: octo/example#123" in result.output
+    assert "CI gate failed: risk HIGH" in result.output
+    assert "secret-token" not in result.output
+    assert output_path.exists()
+
+
 def test_scan_pr_can_publish_comment(monkeypatch, tmp_path: Path) -> None:
     runner = CliRunner()
     output_path = tmp_path / "pr-report.md"

@@ -120,6 +120,11 @@ def _validate_non_blank_strings(values: list[str]) -> list[str]:
     return values
 
 
+class AddedDiffLine(StrictConfigModel):
+    content: str
+    line_number: int | None = Field(default=None, ge=1)
+
+
 class DiffFile(StrictConfigModel):
     path: str
     status: DiffStatus
@@ -129,6 +134,7 @@ class DiffFile(StrictConfigModel):
     language: str | None = None
     is_test_file: bool = False
     is_critical_file: bool = False
+    added_lines: list[AddedDiffLine] = Field(default_factory=list, exclude=True)
 
 
 class RiskFinding(StrictConfigModel):

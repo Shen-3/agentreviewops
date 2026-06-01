@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fnmatch import fnmatchcase
 from pathlib import Path
+import re
 import shlex
 
-from agentreview.models import AgentReviewConfig, DiffFile, DiffStatus
+from agentreview.models import AddedDiffLine, AgentReviewConfig, DiffFile, DiffStatus
 
 LANGUAGE_BY_EXTENSION = {
     ".css": "css",
@@ -25,6 +26,8 @@ LANGUAGE_BY_EXTENSION = {
 LANGUAGE_BY_FILENAME = {
     "Dockerfile": "dockerfile",
 }
+
+HUNK_HEADER_RE = re.compile(r"^@@ -(?P<old_start>\d+)(?:,\d+)? \+(?P<new_start>\d+)(?:,\d+)? @@")
 
 
 def parse_diff_file(path: str | Path, config: AgentReviewConfig | None = None) -> list[DiffFile]:
@@ -70,10 +73,29 @@ def parse_unified_diff(diff_text: str, config: AgentReviewConfig | None = None) 
                 current.status = "deleted"
             else:
                 current.path = new_path
+        elif line.startswith("@@ "):
+            old_line_number, new_line_number = _parse_hunk_line_numbers(line)
+            current.old_line_number = old_line_number
+            current.new_line_number = new_line_number
         elif line.startswith("+"):
             current.additions += 1
+            current.added_lines.append(
+                AddedDiffLine(
+                    content=line[1:],
+                    line_number=current.new_line_number,
+                )
+            )
+            if current.new_line_number is not None:
+                current.new_line_number += 1
         elif line.startswith("-"):
             current.deletions += 1
+            if current.old_line_number is not None:
+                current.old_line_number += 1
+        elif line.startswith(" "):
+            if current.old_line_number is not None:
+                current.old_line_number += 1
+            if current.new_line_number is not None:
+                current.new_line_number += 1
 
     if current is not None:
         parsed_files.append(_build_diff_file(current, active_config))
@@ -94,6 +116,9 @@ class _PartialDiffFile:
         self.status: DiffStatus = status
         self.additions = 0
         self.deletions = 0
+        self.added_lines: list[AddedDiffLine] = []
+        self.old_line_number: int | None = None
+        self.new_line_number: int | None = None
 
 
 def _build_diff_file(partial: _PartialDiffFile, config: AgentReviewConfig) -> DiffFile:
@@ -110,6 +135,7 @@ def _build_diff_file(partial: _PartialDiffFile, config: AgentReviewConfig) -> Di
         language=detect_language(partial.path),
         is_test_file=_matches_any(paths, config.test_patterns),
         is_critical_file=_matches_any(paths, config.critical_paths),
+        added_lines=partial.added_lines,
     )
 
 
@@ -123,6 +149,13 @@ def _parse_diff_git_paths(line: str) -> tuple[str, str]:
 def _parse_file_marker_path(line: str) -> str | None:
     marker_path = line[4:].split("\t", maxsplit=1)[0].strip()
     return _strip_git_prefix(marker_path)
+
+
+def _parse_hunk_line_numbers(line: str) -> tuple[int | None, int | None]:
+    match = HUNK_HEADER_RE.match(line)
+    if match is None:
+        return None, None
+    return int(match.group("old_start")), int(match.group("new_start"))
 
 
 def _strip_git_prefix(path: str) -> str | None:

@@ -26,11 +26,13 @@ def test_report_includes_required_sections() -> None:
 
     report = generate_markdown_report(analysis, changed_files, config=config)
 
-    assert "# AgentReviewOps Report" in report
-    assert "## Summary" in report
-    assert "## Findings" in report
-    assert "## Human Review Checklist" in report
-    assert "## Changed Files" in report
+    assert "# AgentReviewOps Report: HIGH risk (55/100)" in report
+    assert "## Merge recommendation" in report
+    assert "Human review required before merge." in report
+    assert "## Why this requires attention" in report
+    assert "## Findings table" in report
+    assert "## Changed files summary" in report
+    assert "## Suggested human review checklist" in report
     assert "## Policy Config Used" in report
 
 

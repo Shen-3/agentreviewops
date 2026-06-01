@@ -1,17 +1,102 @@
 # GitHub Action Usage
 
-AgentReviewOps can run in GitHub Actions by scanning a prepared unified diff, uploading the generated Markdown report as an artifact, optionally submitting the diff to a self-hosted AgentReviewOps API so it appears in the dashboard, and optionally posting or updating a pull request comment.
+The recommended GitHub Actions entrypoint is the root composite action:
 
-Keep API keys in GitHub Secrets and pass them through environment variables, not inline command output.
+```yaml
+- uses: Shen-3/agentreviewops@main
+  with:
+    github-token: ${{ github.token }}
+    config: .agentreview.yml
+    comment: "true"
+    fail-on: high
+```
 
-## Basic PR Workflow
+The action installs AgentReviewOps from its own `$GITHUB_ACTION_PATH`, builds a pull request diff when `diff-file` is not provided, writes a Markdown report, optionally posts the report as a PR comment, optionally submits the analysis to a self-hosted AgentReviewOps API, and applies the configured CI failure threshold.
 
-Create a workflow such as `.github/workflows/agentreview.yml`:
+Keep API keys in GitHub Secrets. Do not echo GitHub tokens, AgentReviewOps API keys, or OpenAI-compatible provider keys from workflow steps.
+
+## Recommended Workflow
+
+Create `.github/workflows/agentreview.yml`:
 
 ```yaml
 name: AgentReviewOps
 
-"on":
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: Shen-3/agentreviewops@main
+        with:
+          github-token: ${{ github.token }}
+          config: .agentreview.yml
+          comment: "true"
+          fail-on: high
+```
+
+When `diff-file` is omitted on `pull_request` or `pull_request_target` events, the action reads the event payload, resolves the base/head SHAs, and writes a temporary unified diff before running `agentreview scan-diff`.
+
+## `fail-on`
+
+`fail-on` maps directly to the CLI `--fail-on` option, which accepts `low|medium|high|block|never`.
+
+- `never` always lets the scan command succeed unless there is a real read, config, plugin, AI provider, or API error.
+- `high` fails CI for `high` and `block` risk.
+- `medium` fails CI for `medium`, `high`, and `block` risk.
+- `block` fails CI only for `block` risk.
+
+The action still writes the report and runs configured comment/submission steps before the final CI failure is applied.
+
+## Reports And Artifacts
+
+The action writes the Markdown report to `output`, which defaults to `agentreview-report.md`. The same file is used for the PR comment when `comment: "true"`.
+
+To retain the report as a workflow artifact, add an upload step after the action. Use `if: always()` if you want the artifact even when `fail-on` fails the job.
+
+```yaml
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: agentreview-report
+    path: agentreview-report.md
+```
+
+## Self-Hosted Dashboard Submission
+
+Pass `api-url` and `api-key` to submit the same diff to a self-hosted AgentReviewOps API:
+
+```yaml
+- uses: Shen-3/agentreviewops@main
+  with:
+    github-token: ${{ github.token }}
+    config: .agentreview.yml
+    comment: "true"
+    fail-on: high
+    api-url: ${{ vars.AGENTREVIEW_API_URL }}
+    api-key: ${{ secrets.AGENTREVIEW_API_KEY }}
+```
+
+The action sends the API key through `AGENTREVIEW_API_KEY` and does not print it.
+
+## Advanced Manual Fallback
+
+Use the manual flow when you need full control over installation, diff construction, artifact upload, or command ordering.
+
+```yaml
+name: AgentReviewOps Manual
+
+on:
   pull_request:
 
 permissions:
@@ -21,17 +106,12 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    env:
-      AGENTREVIEW_API_KEY: ${{ secrets.AGENTREVIEW_API_KEY }}
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -40,17 +120,19 @@ jobs:
         run: python -m pip install -e "."
 
       - name: Build PR diff
-        run: git diff --unified=0 "origin/${{ github.base_ref }}" HEAD > agentreview.diff
+        run: git diff --unified=3 "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > agentreview.diff
 
       - name: Run AgentReviewOps
-        run: agentreview scan-diff --diff-file agentreview.diff --config .agentreview.example.yml --output agentreview-report.md
+        run: agentreview scan-diff --diff-file agentreview.diff --config .agentreview.yml --output agentreview-report.md --fail-on high
 
       - name: Submit to AgentReviewOps dashboard
-        if: ${{ env.AGENTREVIEW_API_KEY != '' }}
+        if: ${{ vars.AGENTREVIEW_API_URL != '' && secrets.AGENTREVIEW_API_KEY != '' }}
+        env:
+          AGENTREVIEW_API_KEY: ${{ secrets.AGENTREVIEW_API_KEY }}
         run: |
           agentreview submit-diff \
             --diff-file agentreview.diff \
-            --config .agentreview.example.yml \
+            --config .agentreview.yml \
             --api-url "${{ vars.AGENTREVIEW_API_URL }}" \
             --repository "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
@@ -59,77 +141,19 @@ jobs:
             --branch "${{ github.head_ref }}"
 
       - name: Comment on pull request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           agentreview comment-pr \
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
             --report-file agentreview-report.md
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Upload report
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: agentreview-report
           path: agentreview-report.md
 ```
 
-## Composite Action Example
-
-This repository also includes a local composite action at `examples/github-action/action.yml`.
-
-In a consuming repository, set up Python first, check out the repository you want to scan, prepare `agentreview.diff`, then call the action with artifact-only output:
-
-```yaml
-- name: Set up Python
-  uses: actions/setup-python@v6
-  with:
-    python-version: "3.12"
-
-- name: Check out repository
-  uses: actions/checkout@v6
-  with:
-    fetch-depth: 0
-
-- name: Build PR diff
-  run: git diff --unified=0 "origin/${{ github.base_ref }}" HEAD > agentreview.diff
-
-- name: Run AgentReviewOps composite action
-  uses: Shen-3/agentreviewops/examples/github-action@main
-  with:
-    diff-file: agentreview.diff
-    config: .agentreview.yml
-    output: agentreview-report.md
-```
-
-The composite action installs AgentReviewOps from its own `$GITHUB_ACTION_PATH`, not from the consuming repository, then runs `agentreview scan-diff`.
-
-To also submit the analysis to a self-hosted dashboard, pass the optional API inputs:
-
-```yaml
-- name: Run AgentReviewOps composite action
-  uses: Shen-3/agentreviewops/examples/github-action@main
-  with:
-    diff-file: agentreview.diff
-    config: .agentreview.yml
-    output: agentreview-report.md
-    api-url: ${{ vars.AGENTREVIEW_API_URL }}
-    api-key: ${{ secrets.AGENTREVIEW_API_KEY }}
-    repository: ${{ github.repository }}
-    pr-number: ${{ github.event.pull_request.number }}
-    title: ${{ github.event.pull_request.title }}
-    author: ${{ github.actor }}
-    branch: ${{ github.head_ref }}
-    github-comment: "true"
-    github-token: ${{ github.token }}
-```
-
-## PR Comments
-
-`agentreview comment-pr` posts or updates one AgentReviewOps PR comment using a hidden marker, so repeated workflow runs update the prior comment instead of adding duplicate review packets.
-
-Use `agentreview scan-pr --comment` when you want the CLI to fetch the diff, generate the report, and publish the PR comment in one command.
-
-## Report Handling
-
-Use `actions/upload-artifact@v4` to retain `agentreview-report.md` for human review. Use `agentreview submit-diff` when you want the same analysis stored in the dashboard.
+`agentreview comment-pr` posts or updates one AgentReviewOps PR comment using a hidden marker, so repeated workflow runs update the previous comment instead of adding duplicates.

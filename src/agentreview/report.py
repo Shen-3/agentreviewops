@@ -12,36 +12,51 @@ def generate_markdown_report(
 ) -> str:
     active_config = config or AgentReviewConfig()
     sections = [
-        "# AgentReviewOps Report",
+        f"# AgentReviewOps Report: {analysis.risk_level.upper()} risk ({analysis.risk_score}/100)",
         "",
-        f"Risk: {analysis.risk_level.upper()} ({analysis.risk_score}/100)",
+        "## Merge recommendation",
         "",
-        "## Summary",
+        _build_merge_recommendation(analysis),
         "",
-        _build_summary(analysis, changed_files),
+        _build_attention_summary(analysis, changed_files),
     ]
     if ai_summary is not None:
         sections.extend(["", "## AI Summary", "", _build_ai_summary(ai_summary)])
 
     sections.extend([
         "",
-        "## Findings",
+        "## Findings table",
         "",
         _build_findings_table(analysis.findings),
         "",
-        "## Human Review Checklist",
-        "",
-        _build_checklist(analysis.findings),
-        "",
-        "## Changed Files",
+        "## Changed files summary",
         "",
         _build_changed_files_table(changed_files),
+        "",
+        "## Suggested human review checklist",
+        "",
+        _build_checklist(analysis.findings),
         "",
         "## Policy Config Used",
         "",
         _build_config_summary(active_config),
     ])
     return "\n".join(sections).rstrip() + "\n"
+
+
+def _build_merge_recommendation(analysis: RiskAnalysis) -> str:
+    recommendations = {
+        "block": "Do not merge until required human review is complete.",
+        "high": "Human review required before merge.",
+        "medium": "Review recommended before merge.",
+        "low": "No additional gate triggered by current policy.",
+    }
+    return recommendations[analysis.risk_level]
+
+
+def _build_attention_summary(analysis: RiskAnalysis, changed_files: list[DiffFile]) -> str:
+    heading = "Why this looks safe" if analysis.risk_level == "low" else "Why this requires attention"
+    return f"## {heading}\n\n{_build_summary(analysis, changed_files)}"
 
 
 def _build_summary(analysis: RiskAnalysis, changed_files: list[DiffFile]) -> str:
@@ -52,9 +67,10 @@ def _build_summary(analysis: RiskAnalysis, changed_files: list[DiffFile]) -> str
     if not positive_findings:
         return f"{len(changed_files)} file(s) changed with no positive risk findings from the configured deterministic rules."
 
+    highest_severity = _highest_positive_severity(positive_findings).upper()
     return (
         f"{len(changed_files)} file(s) changed with {len(positive_findings)} positive risk finding(s). "
-        f"Review the {analysis.risk_level.upper()} risk areas before merge."
+        f"The highest deterministic finding severity is {highest_severity}; review the listed risk areas before merge."
     )
 
 
@@ -68,11 +84,11 @@ def _build_ai_summary(ai_summary: DiffSummaryResult) -> str:
 
 def _build_findings_table(findings: list[RiskFinding]) -> str:
     lines = [
-        "| Severity | Rule | File | Reason |",
-        "|---|---|---|---|",
+        "| Severity | Rule | Score | File | Reason |",
+        "|---|---|---:|---|---|",
     ]
     if not findings:
-        lines.append("| INFO | none | Change set | No findings produced by the configured rules. |")
+        lines.append("| INFO | none | 0 | Change set | No findings produced by the configured rules. |")
         return "\n".join(lines)
 
     for finding in findings:
@@ -81,34 +97,38 @@ def _build_findings_table(findings: list[RiskFinding]) -> str:
             "| "
             f"{_escape_table_cell(finding.severity.upper())} | "
             f"{_escape_table_cell(finding.rule_id)} | "
+            f"{score} | "
             f"{_escape_table_cell(finding.file_path or 'Change set')} | "
-            f"{_escape_table_cell(finding.description)} Score {score}. |"
+            f"{_escape_table_cell(finding.description)} |"
         )
     return "\n".join(lines)
 
 
 def _build_checklist(findings: list[RiskFinding]) -> str:
-    checklist_by_rule = {
-        "critical-path-change": "Verify critical-path changes are intentional and scoped.",
-        "dependency-change": "Confirm dependency changes are intentional and trusted.",
-        "ci-change": "Confirm CI/CD changes do not weaken build, test, or release controls.",
-        "sensitive-area-change": "Review auth, security, or payments behavior with a human owner.",
-        "missing-tests": "Require tests for changed behavior or document why tests are not needed.",
-        "large-diff": "Split review by subsystem and inspect the highest-risk files first.",
-        "generated-file-added": "Confirm generated or minified artifacts come from a trusted source.",
-        "database-migration-change": "Verify migration order, rollback behavior, and compatibility.",
-        "missing-docs": "Confirm whether behavior changes require documentation updates.",
-    }
+    rule_ids = {finding.rule_id for finding in findings}
     items: list[str] = []
-    seen: set[str] = set()
-    for finding in findings:
-        item = checklist_by_rule.get(finding.rule_id)
-        if item is not None and item not in seen:
-            seen.add(item)
-            items.append(f"- [ ] {item}")
 
-    if not items:
-        return "- [ ] Confirm the change matches the pull request intent."
+    if "missing-tests" in rule_ids:
+        items.append("- [ ] Verify adequate tests were added, or document why tests are not required.")
+    if {"critical-path-change", "sensitive-area-change"} & rule_ids:
+        items.append("- [ ] Get security or code owner review for the sensitive or critical-path changes.")
+    if "dependency-change" in rule_ids:
+        items.append("- [ ] Review dependency changes for provenance, licensing, and lockfile consistency.")
+    if "ci-change" in rule_ids:
+        items.append("- [ ] Review CI/CD workflow changes for permission, secret, and release-control impact.")
+    if "database-migration-change" in rule_ids:
+        items.append("- [ ] Review migration order, backward compatibility, rollback behavior, and deployment timing.")
+
+    high_or_medium_findings = [
+        finding
+        for finding in findings
+        if finding.score_delta > 0 and finding.severity in {"medium", "high", "critical"}
+    ]
+    if not high_or_medium_findings:
+        items.append("- [ ] Complete the normal code review and confirm the change matches the pull request intent.")
+    elif not items:
+        items.append("- [ ] Review the flagged high or medium findings with the relevant owner before merge.")
+
     return "\n".join(items)
 
 
@@ -166,6 +186,17 @@ def _format_score_delta(score_delta: int) -> str:
     if score_delta > 0:
         return f"+{score_delta}"
     return str(score_delta)
+
+
+def _highest_positive_severity(findings: list[RiskFinding]) -> str:
+    severity_order = {
+        "info": 0,
+        "low": 1,
+        "medium": 2,
+        "high": 3,
+        "critical": 4,
+    }
+    return max(findings, key=lambda finding: severity_order[finding.severity]).severity
 
 
 def _escape_table_cell(value: str) -> str:
