@@ -703,6 +703,14 @@ def test_repository_scoped_policy_overrides_org_policy_and_records_routing(clien
     analysis_body = analysis_response.json()
     assert "critical-path-change" in {finding["rule_id"] for finding in analysis_body["findings"]}
     assert analysis_body["risk_score"] > 0
+    assert analysis_body["review_requirements"][0]["requirement_id"] == "security-review"
+    assert analysis_body["review_requirements"][0]["suggested_reviewers"] == [
+        {
+            "source": "repository_membership",
+            "identifier": "reviewer@example.com",
+            "role": "maintainer",
+        }
+    ]
 
     audit_response = client.get("/api/audit-events", params={"action": "analysis.created"})
     assert audit_response.status_code == 200
@@ -713,6 +721,10 @@ def test_repository_scoped_policy_overrides_org_policy_and_records_routing(clien
     assert analysis_audit["metadata"]["repository_id"] == repository["repository_id"]
     assert analysis_audit["metadata"]["routed_reviewer_count"] == 1
     assert analysis_audit["metadata"]["routed_reviewer_roles"] == ["maintainer"]
+    assert analysis_audit["metadata"]["review_requirement_count"] == 1
+    assert analysis_audit["metadata"]["unconfigured_review_requirement_count"] == 0
+    assert analysis_audit["metadata"]["reviewer_sources"] == ["repository_membership"]
+    assert analysis_audit["metadata"]["required_roles"] == ["maintainer", "owner"]
 
     unknown_repo_response = client.post(
         "/api/analyze/diff",
@@ -800,7 +812,10 @@ def test_analyze_diff_persists_and_returns_report(client: TestClient) -> None:
     assert body["risk_level"] == "high"
     assert body["changed_files"][0]["path"] == "auth/session.py"
     assert body["findings"][0]["rule_id"] == "critical-path-change"
+    assert body["review_requirements"][0]["requirement_id"] == "security-review"
+    assert body["review_requirements"][0]["suggested_reviewers"][0]["identifier"] == "reviewer@example.com"
     assert body["markdown"].startswith("# AgentReviewOps Report")
+    assert "Repository membership: reviewer@example.com" in body["markdown"]
 
     report_response = client.get(f"/api/analysis-runs/{body['analysis_run_id']}/report")
 
@@ -809,6 +824,7 @@ def test_analyze_diff_persists_and_returns_report(client: TestClient) -> None:
     assert report_body["analysis_run_id"] == body["analysis_run_id"]
     assert report_body["markdown"] == body["markdown"]
     assert report_body["changed_files"][0]["path"] == "auth/session.py"
+    assert report_body["review_requirements"] == body["review_requirements"]
 
     audit_response = client.get("/api/audit-events")
 
@@ -822,6 +838,10 @@ def test_analyze_diff_persists_and_returns_report(client: TestClient) -> None:
     assert audit_event["metadata"]["risk_score"] == 55
     assert audit_event["metadata"]["agent_name"] == "Codex"
     assert audit_event["metadata"]["branch"] == "codex/auth-session-hardening"
+    assert audit_event["metadata"]["review_requirement_count"] == 1
+    assert audit_event["metadata"]["unconfigured_review_requirement_count"] == 0
+    assert audit_event["metadata"]["reviewer_sources"] == ["repository_membership"]
+    assert audit_event["metadata"]["required_roles"] == ["maintainer", "owner"]
     assert "diff" not in audit_event["metadata"]
     assert "markdown" not in audit_event["metadata"]
 

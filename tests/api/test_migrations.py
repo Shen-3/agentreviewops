@@ -33,6 +33,7 @@ def test_alembic_upgrade_creates_analysis_tables(tmp_path: Path, monkeypatch) ->
 
     analysis_columns = {column["name"] for column in inspector.get_columns("analysis_runs")}
     assert "organization_id" in analysis_columns
+    assert "review_requirements_json" in analysis_columns
 
     api_key_columns = {column["name"] for column in inspector.get_columns("api_keys")}
     assert "role" in api_key_columns

@@ -42,6 +42,8 @@ DEFAULT_PR_BODY_MARKERS = [
     "Created by Devin",
 ]
 
+SUPPORTED_REPOSITORY_REVIEWER_ROLES = {"owner", "maintainer", "reviewer"}
+
 
 class StrictConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -91,6 +93,95 @@ class PluginConfig(StrictConfigModel):
     timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 
 
+class CodeownersConfig(StrictConfigModel):
+    enabled: bool = True
+    path: str | None = None
+
+
+class ReviewRoutingRuleConfig(StrictConfigModel):
+    id: str
+    paths: list[str] = Field(default_factory=list)
+    rule_ids: list[str] = Field(default_factory=list)
+    risk_levels: list[RiskLevel] = Field(default_factory=list)
+    require_roles: list[str] = Field(default_factory=list)
+    reason: str
+
+    @field_validator("paths", "rule_ids")
+    @classmethod
+    def validate_non_blank_lists(cls, values: list[str]) -> list[str]:
+        return _validate_non_blank_strings(values)
+
+    @field_validator("require_roles")
+    @classmethod
+    def validate_require_roles(cls, values: list[str]) -> list[str]:
+        values = _validate_non_blank_strings(values)
+        unsupported_roles = sorted(set(values) - SUPPORTED_REPOSITORY_REVIEWER_ROLES)
+        if unsupported_roles:
+            raise ValueError(f"unsupported repository reviewer role(s): {', '.join(unsupported_roles)}")
+        return values
+
+    @field_validator("id", "reason")
+    @classmethod
+    def validate_non_blank_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("routing rule id and reason must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_at_least_one_matcher(self) -> ReviewRoutingRuleConfig:
+        if not self.paths and not self.rule_ids and not self.risk_levels:
+            raise ValueError("routing rule requires at least one matcher: paths, rule_ids, or risk_levels")
+        return self
+
+
+def _default_review_routing_rules() -> list[ReviewRoutingRuleConfig]:
+    return [
+        ReviewRoutingRuleConfig(
+            id="security-review",
+            paths=["auth/**", "security/**", "payments/**"],
+            rule_ids=[
+                "sensitive-area-change",
+                "critical-path-change",
+                "python-subprocess-shell-true",
+                "python-eval-exec",
+                "python-unsafe-yaml-load",
+            ],
+            require_roles=["maintainer", "owner"],
+            reason="Sensitive or dangerous code path changed.",
+        ),
+        ReviewRoutingRuleConfig(
+            id="ci-review",
+            paths=[".github/workflows/**"],
+            rule_ids=[
+                "ci-change",
+                "github-actions-write-all-permissions",
+                "github-actions-pull-request-target",
+                "github-actions-unpinned-action",
+            ],
+            require_roles=["maintainer"],
+            reason="CI/CD or supply-chain sensitive workflow changed.",
+        ),
+        ReviewRoutingRuleConfig(
+            id="dependency-review",
+            rule_ids=["dependency-change"],
+            require_roles=["maintainer"],
+            reason="Dependency metadata changed.",
+        ),
+        ReviewRoutingRuleConfig(
+            id="block-risk-review",
+            risk_levels=["block"],
+            require_roles=["owner"],
+            reason="Policy classified this pull request as block risk.",
+        ),
+    ]
+
+
+class ReviewRoutingConfig(StrictConfigModel):
+    enabled: bool = True
+    rules: list[ReviewRoutingRuleConfig] = Field(default_factory=_default_review_routing_rules)
+    codeowners: CodeownersConfig = Field(default_factory=CodeownersConfig)
+
+
 class AgentReviewConfig(StrictConfigModel):
     version: int = 1
     risk: RiskConfig = Field(default_factory=RiskConfig)
@@ -100,6 +191,7 @@ class AgentReviewConfig(StrictConfigModel):
     rules: RulesConfig = Field(default_factory=RulesConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     plugins: list[PluginConfig] = Field(default_factory=list)
+    review_routing: ReviewRoutingConfig = Field(default_factory=ReviewRoutingConfig)
 
     @model_validator(mode="after")
     def validate_supported_version(self) -> AgentReviewConfig:
@@ -153,3 +245,35 @@ class RiskAnalysis(StrictConfigModel):
     risk_score: int = Field(ge=0, le=100)
     risk_level: RiskLevel
     findings: list[RiskFinding] = Field(default_factory=list)
+
+
+class SuggestedReviewer(StrictConfigModel):
+    source: str
+    identifier: str
+    role: str | None = None
+
+    @field_validator("source", "identifier")
+    @classmethod
+    def validate_non_blank_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("reviewer source and identifier must not be blank")
+        return value
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in SUPPORTED_REPOSITORY_REVIEWER_ROLES:
+            raise ValueError(f"unsupported repository reviewer role: {value}")
+        return value
+
+
+class ReviewRequirement(StrictConfigModel):
+    requirement_id: str
+    title: str
+    reason: str
+    matched_files: list[str] = Field(default_factory=list)
+    matched_rule_ids: list[str] = Field(default_factory=list)
+    required_roles: list[str] = Field(default_factory=list)
+    suggested_reviewers: list[SuggestedReviewer] = Field(default_factory=list)

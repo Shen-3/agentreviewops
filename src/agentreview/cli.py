@@ -13,6 +13,7 @@ from agentreview.analysis import analyze_diff_text
 from agentreview.config import ConfigError, DEFAULT_CONFIG_PATH, load_config
 from agentreview.integrations.github import GitHubIntegrationError, MissingGitHubTokenError, fetch_pull_request_diff, upsert_pull_request_comment
 from agentreview.plugins import PluginError
+from agentreview.routing import load_codeowners_text
 
 app = typer.Typer(
     name="agentreview",
@@ -153,11 +154,24 @@ def scan_diff(
         "--fail-on",
         help="Exit with code 1 when risk is at or above this level.",
     ),
+    codeowners_file: Path | None = typer.Option(
+        None,
+        "--codeowners-file",
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
+        help="Optional CODEOWNERS file for human review routing. Defaults to standard CODEOWNERS paths.",
+    ),
 ) -> None:
     """Analyze a unified diff and write a Markdown review report."""
     try:
         config = load_config(config_path)
-        result = analyze_diff_text(diff_file.read_text(encoding="utf-8"), config=config)
+        codeowners_text = _load_codeowners_for_cli(codeowners_file, config.review_routing.codeowners.path)
+        result = analyze_diff_text(
+            diff_file.read_text(encoding="utf-8"),
+            config=config,
+            codeowners_text=codeowners_text,
+        )
     except ConfigError as exc:
         typer.echo(f"Config error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
@@ -328,6 +342,14 @@ def scan_pr(
         "--fail-on",
         help="Exit with code 1 when risk is at or above this level.",
     ),
+    codeowners_file: Path | None = typer.Option(
+        None,
+        "--codeowners-file",
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
+        help="Optional CODEOWNERS file for human review routing. Defaults to standard CODEOWNERS paths.",
+    ),
     comment: bool = typer.Option(
         False,
         "--comment/--no-comment",
@@ -337,8 +359,9 @@ def scan_pr(
     """Fetch a GitHub pull request diff and write a Markdown review report."""
     try:
         config = load_config(config_path)
+        codeowners_text = _load_codeowners_for_cli(codeowners_file, config.review_routing.codeowners.path)
         diff_text = fetch_pull_request_diff(repo=repo, pr_number=pr_number, token=os.environ.get("GITHUB_TOKEN"))
-        result = analyze_diff_text(diff_text, config=config)
+        result = analyze_diff_text(diff_text, config=config, codeowners_text=codeowners_text)
     except ConfigError as exc:
         typer.echo(f"Config error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
@@ -442,6 +465,25 @@ def _response_error_detail(response: httpx.Response) -> str:
         return f"{response.status_code} {response.reason_phrase}"
     detail = body.get("detail") if isinstance(body, dict) else None
     return f"{response.status_code} {detail or response.reason_phrase}"
+
+
+def _load_codeowners_for_cli(codeowners_file: Path | None, configured_path: str | None = None) -> str | None:
+    if codeowners_file is not None:
+        try:
+            return codeowners_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"Could not read CODEOWNERS file {codeowners_file}: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+    if configured_path:
+        try:
+            return load_codeowners_text(configured_path)
+        except OSError as exc:
+            typer.echo(f"Could not read CODEOWNERS file {configured_path}: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+    try:
+        return load_codeowners_text()
+    except OSError:
+        return None
 
 
 def _enforce_fail_on(risk_level: str, risk_score: int, fail_on: FailOnLevel) -> None:

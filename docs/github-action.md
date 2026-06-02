@@ -9,6 +9,7 @@ The recommended GitHub Actions entrypoint is the root composite action:
     config: .agentreview.yml
     comment: "true"
     fail-on: high
+    codeowners-file: .github/CODEOWNERS
 ```
 
 The action installs AgentReviewOps from its own `$GITHUB_ACTION_PATH`, builds a pull request diff when `diff-file` is not provided, writes a Markdown report, optionally posts the report as a PR comment, optionally submits the analysis to a self-hosted AgentReviewOps API, and applies the configured CI failure threshold.
@@ -43,6 +44,7 @@ jobs:
           config: .agentreview.yml
           comment: "true"
           fail-on: high
+          codeowners-file: .github/CODEOWNERS
 ```
 
 When `diff-file` is omitted on `pull_request` or `pull_request_target` events, the action reads the event payload, resolves the base/head SHAs, and writes a temporary unified diff before running `agentreview scan-diff`.
@@ -57,6 +59,24 @@ When `diff-file` is omitted on `pull_request` or `pull_request_target` events, t
 - `block` fails CI only for `block` risk.
 
 The action still writes the report and runs configured comment/submission steps before the final CI failure is applied.
+
+## Review Routing And CODEOWNERS
+
+AgentReviewOps can turn deterministic findings into required human review requirements. It can use policy rules, repository memberships, and CODEOWNERS.
+
+Pass `codeowners-file` when your CODEOWNERS file lives in a non-standard path or you want explicit control:
+
+```yaml
+- uses: Shen-3/agentreviewops@main
+  with:
+    github-token: ${{ github.token }}
+    config: .agentreview.yml
+    comment: "true"
+    fail-on: high
+    codeowners-file: .github/CODEOWNERS
+```
+
+When `codeowners-file` is omitted, the CLI looks for `.github/CODEOWNERS`, `CODEOWNERS`, then `docs/CODEOWNERS`. If no CODEOWNERS file exists, analysis still succeeds and any triggered requirement without a reviewer appears as `Not configured` in the report.
 
 ## Reports And Artifacts
 
@@ -83,6 +103,7 @@ Pass `api-url` and `api-key` to submit the same diff to a self-hosted AgentRevie
     config: .agentreview.yml
     comment: "true"
     fail-on: high
+    codeowners-file: .github/CODEOWNERS
     api-url: ${{ vars.AGENTREVIEW_API_URL }}
     api-key: ${{ secrets.AGENTREVIEW_API_KEY }}
 ```
@@ -123,7 +144,7 @@ jobs:
         run: git diff --unified=3 "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > agentreview.diff
 
       - name: Run AgentReviewOps
-        run: agentreview scan-diff --diff-file agentreview.diff --config .agentreview.yml --output agentreview-report.md --fail-on high
+        run: agentreview scan-diff --diff-file agentreview.diff --config .agentreview.yml --output agentreview-report.md --fail-on high --codeowners-file .github/CODEOWNERS
 
       - name: Submit to AgentReviewOps dashboard
         if: ${{ vars.AGENTREVIEW_API_URL != '' && secrets.AGENTREVIEW_API_KEY != '' }}

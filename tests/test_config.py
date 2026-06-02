@@ -74,6 +74,14 @@ def test_missing_config_uses_defaults(tmp_path: Path) -> None:
     assert config.rules.require_tests_for_code_changes is True
     assert config.ai.enabled is False
     assert config.plugins == []
+    assert config.review_routing.enabled is True
+    assert config.review_routing.codeowners.enabled is True
+    assert [rule.id for rule in config.review_routing.rules] == [
+        "security-review",
+        "ci-review",
+        "dependency-review",
+        "block-risk-review",
+    ]
 
 
 def test_example_config_loads() -> None:
@@ -84,6 +92,7 @@ def test_example_config_loads() -> None:
     assert config.version == 1
     assert config.risk.fail_level == "high"
     assert ".github/workflows/**" in config.critical_paths
+    assert config.review_routing.rules[0].id == "security-review"
 
 
 def test_invalid_version_fails_clearly() -> None:
@@ -99,6 +108,42 @@ def test_invalid_risk_threshold_fails_clearly() -> None:
 def test_blank_pattern_fails_clearly() -> None:
     with pytest.raises(ConfigError, match="blank values"):
         parse_config({"version": 1, "critical_paths": ["auth/**", " "]})
+
+
+def test_review_routing_rule_requires_matcher() -> None:
+    with pytest.raises(ConfigError, match="at least one matcher"):
+        parse_config(
+            {
+                "version": 1,
+                "review_routing": {
+                    "rules": [
+                        {
+                            "id": "invalid",
+                            "reason": "No matcher.",
+                        }
+                    ]
+                },
+            }
+        )
+
+
+def test_review_routing_rule_rejects_unsupported_role() -> None:
+    with pytest.raises(ConfigError, match="unsupported repository reviewer role"):
+        parse_config(
+            {
+                "version": 1,
+                "review_routing": {
+                    "rules": [
+                        {
+                            "id": "invalid-role",
+                            "paths": ["auth/**"],
+                            "require_roles": ["admin"],
+                            "reason": "Invalid role.",
+                        }
+                    ]
+                },
+            }
+        )
 
 
 def test_non_mapping_config_fails_clearly(tmp_path: Path) -> None:

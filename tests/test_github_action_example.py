@@ -37,6 +37,7 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert "github-token" in action["inputs"]
     assert action["inputs"]["comment"]["default"] == "true"
     assert action["inputs"]["fail-on"]["default"] == "never"
+    assert action["inputs"]["codeowners-file"]["default"] == ""
     assert "diff-file" in action["inputs"]
     assert "api-url" in action["inputs"]
     assert "api-key" in action["inputs"]
@@ -45,6 +46,7 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert "git diff --no-ext-diff" in steps
     assert "agentreview scan-diff" in steps
     assert "--fail-on" in steps
+    assert "--codeowners-file" in steps
     assert "agentreview submit-diff" in steps
     assert "agentreview comment-pr" in steps
 
@@ -54,6 +56,8 @@ def test_github_action_docs_explain_artifact_flow() -> None:
 
     assert "Shen-3/agentreviewops@main" in docs
     assert "fail-on: high" in docs
+    assert "codeowners-file: .github/CODEOWNERS" in docs
+    assert "Review Routing And CODEOWNERS" in docs
     assert "`--fail-on`" in docs
     assert "agentreview scan-diff" in docs
     assert "agentreview submit-diff" in docs

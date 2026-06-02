@@ -26,6 +26,10 @@ inputs:
     description: Fail the job when risk is at or above this level. One of low, medium, high, block, never.
     required: false
     default: "never"
+  codeowners-file:
+    description: Optional CODEOWNERS file for human review routing. When omitted, standard CODEOWNERS paths are used.
+    required: false
+    default: ""
   api-url:
     description: Optional AgentReviewOps API base URL for self-hosted dashboard submission.
     required: false
@@ -132,15 +136,19 @@ runs:
       env:
         AGENTREVIEW_DIFF_FILE: ${{ steps.prepare.outputs.diff-file }}
         AGENTREVIEW_CONFIG: ${{ inputs.config }}
+        AGENTREVIEW_CODEOWNERS_FILE: ${{ inputs.codeowners-file }}
         AGENTREVIEW_FAIL_ON: ${{ inputs.fail-on }}
         AGENTREVIEW_OUTPUT: ${{ inputs.output }}
       run: |
         set +e
-        agentreview scan-diff \
-          --diff-file "$AGENTREVIEW_DIFF_FILE" \
-          --config "$AGENTREVIEW_CONFIG" \
-          --output "$AGENTREVIEW_OUTPUT" \
+        args=(
+          --diff-file "$AGENTREVIEW_DIFF_FILE"
+          --config "$AGENTREVIEW_CONFIG"
+          --output "$AGENTREVIEW_OUTPUT"
           --fail-on "$AGENTREVIEW_FAIL_ON"
+        )
+        if [ -n "$AGENTREVIEW_CODEOWNERS_FILE" ]; then args+=(--codeowners-file "$AGENTREVIEW_CODEOWNERS_FILE"); fi
+        agentreview scan-diff "${args[@]}"
         status=$?
         set -e
 

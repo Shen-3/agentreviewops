@@ -30,6 +30,7 @@ jobs:
           config: .agentreview.yml
           comment: "true"
           fail-on: high
+          codeowners-file: .github/CODEOWNERS
 ```
 
 `fail-on` controls the CI threshold. For example, `fail-on: high` exits non-zero for `high` or `block` risk after the Markdown report and optional PR comment are produced.
@@ -89,15 +90,17 @@ python -m venv .venv
 
 ```bash
 agentreview --help
-agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md --fail-on high
+agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md --fail-on high --codeowners-file .github/CODEOWNERS
 AGENTREVIEW_API_KEY=<api-key> agentreview submit-diff --diff-file examples/sample.diff --api-url http://127.0.0.1:8000 --repository owner/name --pr 123
-GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --output agentreview-report.md --fail-on high
+GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --output agentreview-report.md --fail-on high --codeowners-file .github/CODEOWNERS
 GITHUB_TOKEN=<github-token> agentreview comment-pr --repo owner/name --pr 123 --report-file agentreview-report.md
 ```
 
 Expected scan output includes the risk level, positive findings, and the report path.
 
 `--fail-on low|medium|high|block|never` controls whether scan commands fail CI after writing the report. The default is `never` for backward compatibility.
+
+`--codeowners-file` lets scan commands use an explicit CODEOWNERS file for human review routing. When omitted, AgentReviewOps looks for `.github/CODEOWNERS`, `CODEOWNERS`, then `docs/CODEOWNERS`; missing CODEOWNERS files are not an error unless you explicitly pass a missing path.
 
 `submit-diff` sends a unified diff to a self-hosted AgentReviewOps API and persists the result for the dashboard. The API key is read from `AGENTREVIEW_API_KEY` or `--api-key` and is not printed in command output.
 
@@ -157,7 +160,7 @@ X-AgentReview-API-Key: <api-key>
 }
 ```
 
-The response includes a persisted analysis run ID scoped to the API key's organization, changed files, findings, risk score, risk level, and Markdown report content. If the analysis repository matches an onboarded repository with an enabled repository policy, that policy is applied first. Otherwise the latest enabled organization policy overrides the request-level config. Use the report endpoint to fetch the stored Markdown report later.
+The response includes a persisted analysis run ID scoped to the API key's organization, changed files, findings, review requirements, risk score, risk level, and Markdown report content. If the analysis repository matches an onboarded repository with an enabled repository policy, that policy is applied first. Otherwise the latest enabled organization policy overrides the request-level config. Use the report endpoint to fetch the stored Markdown report later.
 
 Save an organization policy with the same schema as `.agentreview.yml`:
 
@@ -213,6 +216,35 @@ The key is printed once and stored only as a hash. See [self-hosting docs](docs/
 Issue additional organization API keys with `POST /api/api-keys`, list existing keys with `GET /api/api-keys`, update key names or roles with `PATCH /api/api-keys/{api_key_id}`, and revoke inactive keys with `POST /api/api-keys/{api_key_id}/revoke`. Created keys are returned once and are stored only as hashes. API key roles are `admin`, `ci`, and `read_only`: admin keys can manage governance settings, CI keys can submit analyses, and read-only keys can inspect existing data.
 
 Create organization users with `POST /api/users`, update user roles with `PATCH /api/users/{user_id}`, then assign them to onboarded repositories with `POST /api/repositories/{repository_id}/memberships`. Repository membership roles are `owner`, `maintainer`, and `reviewer`; those assignments are returned in repository list responses and used as reviewer routing metadata during analysis. Update reviewer roles with `PATCH /api/repositories/{repository_id}/memberships/{user_id}`. Remove stale users with `DELETE /api/users/{user_id}`, remove stale reviewer assignments with `DELETE /api/repositories/{repository_id}/memberships/{user_id}`, and remove stale onboarded repositories with `DELETE /api/repositories/{repository_id}`.
+
+## Review routing
+
+AgentReviewOps can turn deterministic findings into required human review requirements. It can use policy rules, repository memberships, and CODEOWNERS.
+
+Routing does not change the risk score and does not request GitHub reviewers automatically. If a routing rule triggers but no reviewer can be found, the report shows `Not configured` so the governance gap is visible.
+
+Example policy:
+
+```yaml
+review_routing:
+  enabled: true
+  codeowners:
+    enabled: true
+  rules:
+    - id: security-review
+      paths: ["auth/**", "security/**"]
+      rule_ids: ["sensitive-area-change", "python-eval-exec"]
+      require_roles: ["maintainer", "owner"]
+      reason: "Sensitive area changed."
+```
+
+Supported repository membership roles for routing are `owner`, `maintainer`, and `reviewer`. The minimal CODEOWNERS parser supports common whitespace-separated entries such as:
+
+```text
+auth/** @security-team
+.github/workflows/** @platform-team @devops
+*.py @backend-team
+```
 
 For a containerized local stack:
 

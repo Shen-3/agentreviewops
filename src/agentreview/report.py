@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from agentreview.ai import DiffSummaryResult
-from agentreview.models import AgentReviewConfig, DiffFile, RiskAnalysis, RiskFinding
+from agentreview.models import AgentReviewConfig, DiffFile, ReviewRequirement, RiskAnalysis, RiskFinding, SuggestedReviewer
 
 
 def generate_markdown_report(
@@ -9,8 +9,10 @@ def generate_markdown_report(
     changed_files: list[DiffFile],
     config: AgentReviewConfig | None = None,
     ai_summary: DiffSummaryResult | None = None,
+    review_requirements: list[ReviewRequirement] | None = None,
 ) -> str:
     active_config = config or AgentReviewConfig()
+    active_review_requirements = review_requirements or []
     sections = [
         f"# AgentReviewOps Report: {analysis.risk_level.upper()} risk ({analysis.risk_score}/100)",
         "",
@@ -19,6 +21,10 @@ def generate_markdown_report(
         _build_merge_recommendation(analysis),
         "",
         _build_attention_summary(analysis, changed_files),
+        "",
+        "## Required human review",
+        "",
+        _build_review_requirements_table(active_review_requirements),
     ]
     if ai_summary is not None:
         sections.extend(["", "## AI Summary", "", _build_ai_summary(ai_summary)])
@@ -35,7 +41,7 @@ def generate_markdown_report(
         "",
         "## Suggested human review checklist",
         "",
-        _build_checklist(analysis.findings),
+        _build_checklist(analysis.findings, active_review_requirements),
         "",
         "## Policy Config Used",
         "",
@@ -104,7 +110,25 @@ def _build_findings_table(findings: list[RiskFinding]) -> str:
     return "\n".join(lines)
 
 
-def _build_checklist(findings: list[RiskFinding]) -> str:
+def _build_review_requirements_table(review_requirements: list[ReviewRequirement]) -> str:
+    if not review_requirements:
+        return "No additional human review routing requirement was triggered by the current policy."
+
+    lines = [
+        "| Requirement | Reviewer source | Why |",
+        "|---|---|---|",
+    ]
+    for requirement in review_requirements:
+        lines.append(
+            "| "
+            f"{_escape_table_cell(requirement.title or requirement.requirement_id)} | "
+            f"{_escape_table_cell(_format_reviewer_sources(requirement.suggested_reviewers))} | "
+            f"{_escape_table_cell(_format_review_requirement_reason(requirement))} |"
+        )
+    return "\n".join(lines)
+
+
+def _build_checklist(findings: list[RiskFinding], review_requirements: list[ReviewRequirement]) -> str:
     rule_ids = {finding.rule_id for finding in findings}
     items: list[str] = []
 
@@ -118,6 +142,10 @@ def _build_checklist(findings: list[RiskFinding]) -> str:
         items.append("- [ ] Review CI/CD workflow changes for permission, secret, and release-control impact.")
     if "database-migration-change" in rule_ids:
         items.append("- [ ] Review migration order, backward compatibility, rollback behavior, and deployment timing.")
+    if any(not requirement.suggested_reviewers for requirement in review_requirements):
+        items.append("- [ ] Assign an appropriate reviewer for unconfigured review requirement(s).")
+    if any(requirement.suggested_reviewers for requirement in review_requirements):
+        items.append("- [ ] Confirm listed CODEOWNERS or repository reviewers approved the change.")
 
     high_or_medium_findings = [
         finding
@@ -186,6 +214,33 @@ def _format_score_delta(score_delta: int) -> str:
     if score_delta > 0:
         return f"+{score_delta}"
     return str(score_delta)
+
+
+def _format_reviewer_sources(reviewers: list[SuggestedReviewer]) -> str:
+    if not reviewers:
+        return "Not configured"
+    return ", ".join(_format_reviewer_source(reviewer) for reviewer in reviewers)
+
+
+def _format_reviewer_source(reviewer: SuggestedReviewer) -> str:
+    source_labels = {
+        "codeowners": "CODEOWNERS",
+        "repository_membership": "Repository membership",
+    }
+    return f"{source_labels.get(reviewer.source, reviewer.source)}: {reviewer.identifier}"
+
+
+def _format_review_requirement_reason(requirement: ReviewRequirement) -> str:
+    details: list[str] = []
+    if requirement.matched_files:
+        details.append(f"files: {', '.join(requirement.matched_files)}")
+    if requirement.matched_rule_ids:
+        details.append(f"rules: {', '.join(requirement.matched_rule_ids)}")
+    if requirement.required_roles:
+        details.append(f"roles: {', '.join(requirement.required_roles)}")
+    if not details:
+        return requirement.reason
+    return f"{requirement.reason} ({'; '.join(details)})"
 
 
 def _highest_positive_severity(findings: list[RiskFinding]) -> str:

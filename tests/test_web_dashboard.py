@@ -25,6 +25,8 @@ def test_dashboard_contains_required_views() -> None:
     assert "membershipForm" in app_tsx
     assert "onRemoveMembership" in app_tsx
     assert "Findings" in app_tsx
+    assert "Required review" in app_tsx
+    assert "reviewRequirements" in app_tsx
     assert "Report preview" in app_tsx
     assert "Policy editor" in app_tsx
     assert "Repository policy" in app_tsx

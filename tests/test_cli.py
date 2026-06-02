@@ -84,6 +84,73 @@ def test_scan_diff_missing_config_uses_defaults(tmp_path: Path) -> None:
     assert output_path.exists()
 
 
+def test_scan_diff_codeowners_file_adds_reviewer_to_report(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    output_path = tmp_path / "report.md"
+    codeowners_path = tmp_path / "CODEOWNERS"
+    codeowners_path.write_text("auth/** @security-team\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--codeowners-file",
+            str(codeowners_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    report = output_path.read_text(encoding="utf-8")
+    assert "## Required human review" in report
+    assert "CODEOWNERS: @security-team" in report
+
+
+def test_scan_diff_without_codeowners_file_does_not_fail(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    output_path = tmp_path / "report.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert output_path.exists()
+
+
+def test_scan_diff_explicit_missing_codeowners_file_fails_clearly(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--codeowners-file",
+            str(tmp_path / "missing-CODEOWNERS"),
+            "--output",
+            str(tmp_path / "report.md"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Could not read CODEOWNERS file" in result.output
+
+
 def test_scan_diff_fail_on_never_does_not_fail_on_high(tmp_path: Path) -> None:
     runner = CliRunner()
     project_root = Path(__file__).parents[1]

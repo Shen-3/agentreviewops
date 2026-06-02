@@ -8,6 +8,12 @@ Human review required before merge.
 
 1 file(s) changed with 4 positive risk finding(s). The highest deterministic finding severity is HIGH; review the listed risk areas before merge.
 
+## Required human review
+
+| Requirement | Reviewer source | Why |
+|---|---|---|
+| Security review | Not configured | Sensitive or dangerous code path changed. (files: auth/session.py; rules: critical-path-change, sensitive-area-change; roles: maintainer, owner) |
+
 ## Findings table
 
 | Severity | Rule | Score | File | Reason |
@@ -28,6 +34,7 @@ Human review required before merge.
 
 - [ ] Verify adequate tests were added, or document why tests are not required.
 - [ ] Get security or code owner review for the sensitive or critical-path changes.
+- [ ] Assign an appropriate reviewer for unconfigured review requirement(s).
 
 ## Policy Config Used
 

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from agentreview.models import AgentReviewConfig, DiffFile, RiskAnalysis, RiskFinding
+from agentreview.models import AgentReviewConfig, DiffFile, ReviewRequirement, RiskAnalysis, RiskFinding
 from agentreview_api.audit import sanitize_audit_metadata
 from agentreview_api.auth import generate_api_key, hash_api_key, key_prefix
 from agentreview_api.db import (
@@ -449,6 +449,7 @@ def create_analysis_run(
     *,
     changed_files: list[DiffFile],
     analysis: RiskAnalysis,
+    review_requirements: list[ReviewRequirement],
     markdown: str,
     config: AgentReviewConfig,
     source: str = "api",
@@ -474,6 +475,7 @@ def create_analysis_run(
         summary=_build_summary(changed_files, analysis),
         markdown=markdown,
         config_json=config.model_dump(mode="json"),
+        review_requirements_json=[requirement.model_dump(mode="json") for requirement in review_requirements],
         changed_files=[
             ChangedFileRecord(
                 path=file.path,
@@ -632,6 +634,13 @@ def to_risk_findings(record: AnalysisRunRecord) -> list[RiskFinding]:
             evidence=finding.evidence_json,
         )
         for finding in record.findings
+    ]
+
+
+def to_review_requirements(record: AnalysisRunRecord) -> list[ReviewRequirement]:
+    return [
+        ReviewRequirement.model_validate(requirement)
+        for requirement in (record.review_requirements_json or [])
     ]
 
 

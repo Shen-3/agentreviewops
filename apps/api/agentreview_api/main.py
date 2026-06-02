@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from agentreview.ai import AIProviderConfigError, AIProviderRequestError
 from agentreview.analysis import analyze_diff_text
-from agentreview.models import AgentReviewConfig, DiffFile, RiskFinding, RiskLevel
+from agentreview.models import AgentReviewConfig, DiffFile, ReviewRequirement, RiskFinding, RiskLevel, SuggestedReviewer
 from agentreview.plugins import PluginError
 from agentreview_api.audit import (
     AUDIT_ACTION_ANALYSIS_CREATED,
@@ -69,6 +69,7 @@ from agentreview_api.repository import (
     purge_retention_records,
     revoke_api_key,
     to_diff_files,
+    to_review_requirements,
     to_risk_findings,
     update_api_key,
     update_policy,
@@ -121,6 +122,7 @@ class AnalyzeDiffResponse(BaseModel):
     risk_level: RiskLevel
     findings: list[RiskFinding]
     changed_files: list[DiffFile]
+    review_requirements: list[ReviewRequirement]
     markdown: str
 
 
@@ -148,6 +150,7 @@ class AnalysisReportResponse(BaseModel):
     risk_level: RiskLevel
     findings: list[RiskFinding]
     changed_files: list[DiffFile]
+    review_requirements: list[ReviewRequirement]
     markdown: str
 
 
@@ -992,8 +995,13 @@ def analyze_diff(
 ) -> AnalyzeDiffResponse:
     policy_selection = _resolve_analysis_config(request.repository, request.config, auth, session)
     config = policy_selection.config
+    repository_reviewers = _repository_reviewers_for_analysis(policy_selection.repository)
     try:
-        result = analyze_diff_text(request.diff, config=config)
+        result = analyze_diff_text(
+            request.diff,
+            config=config,
+            repository_reviewers=repository_reviewers,
+        )
     except PluginError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except AIProviderConfigError as exc:
@@ -1005,6 +1013,7 @@ def analyze_diff(
         session,
         changed_files=result.changed_files,
         analysis=result.analysis,
+        review_requirements=result.review_requirements,
         markdown=result.markdown,
         config=config,
         source="api",
@@ -1033,6 +1042,10 @@ def analyze_diff(
             "risk_score": result.analysis.risk_score,
             "changed_file_count": len(result.changed_files),
             "finding_count": len(result.analysis.findings),
+            "review_requirement_count": len(result.review_requirements),
+            "unconfigured_review_requirement_count": _unconfigured_review_requirement_count(result.review_requirements),
+            "reviewer_sources": _reviewer_sources(result.review_requirements),
+            "required_roles": _required_roles(result.review_requirements),
             "config_source": policy_selection.source,
             "policy_id": policy_selection.policy.id if policy_selection.policy is not None else None,
             "policy_name": policy_selection.policy.name if policy_selection.policy is not None else None,
@@ -1051,6 +1064,7 @@ def analyze_diff(
         risk_level=result.analysis.risk_level,
         findings=result.analysis.findings,
         changed_files=result.changed_files,
+        review_requirements=result.review_requirements,
         markdown=result.markdown,
     )
 
@@ -1112,7 +1126,45 @@ def _get_analysis_report_response(analysis_run_id: str, auth: AuthContext, sessi
         risk_level=record.risk_level,
         findings=to_risk_findings(record),
         changed_files=to_diff_files(record),
+        review_requirements=to_review_requirements(record),
         markdown=record.markdown,
+    )
+
+
+def _repository_reviewers_for_analysis(repository: RepositoryRecord | None) -> list[SuggestedReviewer]:
+    if repository is None:
+        return []
+    return [
+        SuggestedReviewer(
+            source="repository_membership",
+            identifier=membership.user.email,
+            role=membership.role,
+        )
+        for membership in sorted(repository.memberships, key=lambda item: (item.role, item.user.email))
+    ]
+
+
+def _unconfigured_review_requirement_count(review_requirements: list[ReviewRequirement]) -> int:
+    return sum(1 for requirement in review_requirements if not requirement.suggested_reviewers)
+
+
+def _reviewer_sources(review_requirements: list[ReviewRequirement]) -> list[str]:
+    return sorted(
+        {
+            reviewer.source
+            for requirement in review_requirements
+            for reviewer in requirement.suggested_reviewers
+        }
+    )
+
+
+def _required_roles(review_requirements: list[ReviewRequirement]) -> list[str]:
+    return sorted(
+        {
+            role
+            for requirement in review_requirements
+            for role in requirement.required_roles
+        }
     )
 
 

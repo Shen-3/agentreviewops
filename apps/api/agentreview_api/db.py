@@ -174,6 +174,7 @@ class AnalysisRunRecord(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     markdown: Mapped[str] = mapped_column(Text, nullable=False)
     config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    review_requirements_json: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

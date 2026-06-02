@@ -28,6 +28,22 @@ type ChangedFile = {
   test: boolean;
 };
 
+type SuggestedReviewer = {
+  source: string;
+  identifier: string;
+  role: string | null;
+};
+
+type ReviewRequirement = {
+  requirementId: string;
+  title: string;
+  reason: string;
+  matchedFiles: string[];
+  matchedRuleIds: string[];
+  requiredRoles: string[];
+  suggestedReviewers: SuggestedReviewer[];
+};
+
 type Analysis = {
   id: string;
   repo: string;
@@ -43,6 +59,7 @@ type Analysis = {
   findingCount: number;
   changedFiles: ChangedFile[];
   findings: Finding[];
+  reviewRequirements: ReviewRequirement[];
   report: string;
 };
 
@@ -223,6 +240,19 @@ type ApiDetail = {
     is_critical_file: boolean;
     is_test_file: boolean;
   }>;
+  review_requirements: Array<{
+    requirement_id: string;
+    title: string;
+    reason: string;
+    matched_files: string[];
+    matched_rule_ids: string[];
+    required_roles: string[];
+    suggested_reviewers: Array<{
+      source: string;
+      identifier: string;
+      role: string | null;
+    }>;
+  }>;
   markdown: string;
 };
 
@@ -355,6 +385,17 @@ const seededAnalyses: Analysis[] = [
       { severity: "high", rule: "sensitive-area-change", file: "auth/session.py", reason: "Auth behavior changed and needs owner review." },
       { severity: "medium", rule: "missing-tests", file: "Change set", reason: "Production code changed without tests." },
     ],
+    reviewRequirements: [
+      {
+        requirementId: "security-review",
+        title: "Security review",
+        reason: "Sensitive or dangerous code path changed.",
+        matchedFiles: ["auth/session.py"],
+        matchedRuleIds: ["critical-path-change", "sensitive-area-change"],
+        requiredRoles: ["maintainer", "owner"],
+        suggestedReviewers: [{ source: "repository_membership", identifier: "reviewer@example.com", role: "maintainer" }],
+      },
+    ],
     report: `# AgentReviewOps Report
 
 Risk: HIGH (55/100)
@@ -384,6 +425,7 @@ Risk: HIGH (55/100)
     findingCount: 1,
     changedFiles: [{ path: "docs/pricing.md", status: "modified", additions: 12, deletions: 4, critical: false, test: false }],
     findings: [{ severity: "info", rule: "docs-updated", file: "docs/pricing.md", reason: "Documentation changed with no source risk findings." }],
+    reviewRequirements: [],
     report: `# AgentReviewOps Report
 
 Risk: LOW (0/100)
@@ -413,6 +455,17 @@ Documentation-only change. Confirm copy matches the product offer.`,
       { severity: "high", rule: "critical-path-change", file: ".github/workflows/release.yml", reason: "Release automation changed." },
       { severity: "medium", rule: "ci-change", file: ".github/workflows/release.yml", reason: "CI/CD workflow changed." },
       { severity: "medium", rule: "missing-tests", file: "Change set", reason: "Infrastructure change has no validation fixture." },
+    ],
+    reviewRequirements: [
+      {
+        requirementId: "ci-review",
+        title: "Ci review",
+        reason: "CI/CD or supply-chain sensitive workflow changed.",
+        matchedFiles: [".github/workflows/release.yml"],
+        matchedRuleIds: ["ci-change"],
+        requiredRoles: ["maintainer"],
+        suggestedReviewers: [],
+      },
     ],
     report: `# AgentReviewOps Report
 
@@ -1688,6 +1741,7 @@ function AnalysisDetail({ selected }: { selected: Analysis | null }) {
     <section className="analysis-detail" aria-labelledby="analysis-detail-title">
       <DetailHeader level={selected.riskLevel} label={`${selected.riskLevel.toUpperCase()} ${selected.riskScore}`} />
       <DetailGrid repository={selected.repo} pullRequest={`${selected.prLabel} ${selected.title}`} agent={selected.agent} files={selected.changedFileCount} />
+      <RequiredReviewSummary requirements={selected.reviewRequirements} />
       <FindingsTable findings={selected.findings} emptyText="No findings loaded for this analysis." />
       <ReportPreview report={selected.report || "Report detail is loading."} />
     </section>
@@ -1726,6 +1780,46 @@ function DetailGrid({ repository, pullRequest, agent, files }: { repository: str
         <dd>{files}</dd>
       </div>
     </dl>
+  );
+}
+
+function RequiredReviewSummary({ requirements }: { requirements: ReviewRequirement[] }) {
+  const unconfiguredCount = requirements.filter((requirement) => requirement.suggestedReviewers.length === 0).length;
+  return (
+    <section className="findings-section">
+      <div className="section-head">
+        <div>
+          <h3>Required review</h3>
+          <p>{requirements.length} requirement(s), {unconfiguredCount} unconfigured.</p>
+        </div>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Requirement</th>
+              <th>Reviewers</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {requirements.length ? (
+              requirements.map((requirement) => (
+                <tr key={requirement.requirementId}>
+                  <td>{requirement.title || requirement.requirementId}</td>
+                  <td>{formatSuggestedReviewers(requirement.suggestedReviewers)}</td>
+                  <td>{formatReviewReason(requirement)}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={3}>No required review routing triggered.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -2789,6 +2883,34 @@ function formatApiKeyRole(role: ApiKeyRole) {
   return role.toUpperCase();
 }
 
+function formatSuggestedReviewers(reviewers: SuggestedReviewer[]) {
+  if (!reviewers.length) {
+    return "Not configured";
+  }
+  return reviewers.map((reviewer) => `${formatReviewerSource(reviewer.source)}: ${reviewer.identifier}`).join(", ");
+}
+
+function formatReviewerSource(source: string) {
+  if (source === "codeowners") {
+    return "CODEOWNERS";
+  }
+  if (source === "repository_membership") {
+    return "Repository membership";
+  }
+  return source;
+}
+
+function formatReviewReason(requirement: ReviewRequirement) {
+  const details = [
+    requirement.matchedFiles.length ? requirement.matchedFiles.join(", ") : "",
+    requirement.matchedRuleIds.length ? requirement.matchedRuleIds.join(", ") : "",
+  ].filter(Boolean);
+  if (!details.length) {
+    return requirement.reason;
+  }
+  return `${requirement.reason} ${details.join("; ")}`;
+}
+
 function normalizeSummary(summary: ApiSummary): Analysis {
   return {
     id: summary.analysis_run_id,
@@ -2805,6 +2927,7 @@ function normalizeSummary(summary: ApiSummary): Analysis {
     findingCount: summary.finding_count,
     changedFiles: [],
     findings: [],
+    reviewRequirements: [],
     report: "",
   };
 }
@@ -2827,6 +2950,19 @@ function normalizeDetail(detail: ApiDetail): Partial<Analysis> {
       file: finding.file_path || "Change set",
       reason: finding.description,
     })),
+    reviewRequirements: detail.review_requirements.map((requirement) => ({
+      requirementId: requirement.requirement_id,
+      title: requirement.title,
+      reason: requirement.reason,
+      matchedFiles: requirement.matched_files,
+      matchedRuleIds: requirement.matched_rule_ids,
+      requiredRoles: requirement.required_roles,
+      suggestedReviewers: requirement.suggested_reviewers.map((reviewer) => ({
+        source: reviewer.source,
+        identifier: reviewer.identifier,
+        role: reviewer.role,
+      })),
+    })),
     report: detail.markdown,
   };
 }
@@ -2848,6 +2984,7 @@ function normalizeSubmittedAnalysis(detail: ApiDetail, form: DiffSubmitFormState
     findingCount: partial.findingCount ?? detail.findings.length,
     changedFiles: partial.changedFiles ?? [],
     findings: partial.findings ?? [],
+    reviewRequirements: partial.reviewRequirements ?? [],
     report: partial.report ?? detail.markdown,
   };
 }
