@@ -29,11 +29,21 @@ jobs:
           github-token: ${{ github.token }}
           config: .agentreview.yml
           comment: "true"
+          request-reviewers: "true"
+          reviewer-request-mode: users-and-teams
           fail-on: high
           codeowners-file: .github/CODEOWNERS
 ```
 
 `fail-on` controls the CI threshold. For example, `fail-on: high` exits non-zero for `high` or `block` risk after the Markdown report and optional PR comment are produced.
+
+Reviewer requests are opt-in. Keep `request-reviewers: "false"` or omit it when you only want report/comment behavior. Workflows that comment or request reviewers need:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
 
 ## Current Status
 
@@ -90,9 +100,10 @@ python -m venv .venv
 
 ```bash
 agentreview --help
-agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md --fail-on high --codeowners-file .github/CODEOWNERS
+agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md --json-output agentreview-report.json --fail-on high --codeowners-file .github/CODEOWNERS
 AGENTREVIEW_API_KEY=<api-key> agentreview submit-diff --diff-file examples/sample.diff --api-url http://127.0.0.1:8000 --repository owner/name --pr 123
-GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --output agentreview-report.md --fail-on high --codeowners-file .github/CODEOWNERS
+GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --output agentreview-report.md --json-output agentreview-report.json --fail-on high --codeowners-file .github/CODEOWNERS
+GITHUB_TOKEN=<github-token> agentreview request-reviewers --repo owner/name --pr 123 --analysis-file agentreview-report.json
 GITHUB_TOKEN=<github-token> agentreview comment-pr --repo owner/name --pr 123 --report-file agentreview-report.md
 ```
 
@@ -100,11 +111,15 @@ Expected scan output includes the risk level, positive findings, and the report 
 
 `--fail-on low|medium|high|block|never` controls whether scan commands fail CI after writing the report. The default is `never` for backward compatibility.
 
+`--json-output` writes structured analysis JSON for `scan-diff` and `scan-pr`, including risk, decision, findings, changed files, review requirements, and metadata. The JSON is produced from structured analysis objects, not parsed from Markdown.
+
 `--codeowners-file` lets scan commands use an explicit CODEOWNERS file for human review routing. When omitted, AgentReviewOps looks for `.github/CODEOWNERS`, `CODEOWNERS`, then `docs/CODEOWNERS`; missing CODEOWNERS files are not an error unless you explicitly pass a missing path.
 
 `submit-diff` sends a unified diff to a self-hosted AgentReviewOps API and persists the result for the dashboard. The API key is read from `AGENTREVIEW_API_KEY` or `--api-key` and is not printed in command output.
 
 `scan-pr` fetches the pull request diff from the GitHub API using `GITHUB_TOKEN`. The token is required at runtime and is not printed in command output.
+
+`request-reviewers` reads the JSON created by `--json-output`, resolves review routing suggestions, and calls GitHub's requested reviewers API. CODEOWNERS `@username` entries become individual reviewers and `@org/team-slug` entries become team reviewers. Email addresses are skipped with `email_identifier_not_requestable`; repository membership suggestions without a GitHub login are skipped with `missing_github_login`. AgentReviewOps does not map emails to GitHub users automatically.
 
 `comment-pr` posts or updates the generated report as a GitHub pull request comment using a hidden AgentReviewOps marker, so repeated CI runs update the prior comment rather than creating duplicates.
 

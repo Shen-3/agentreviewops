@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from enum import Enum
 from pathlib import Path
 import os
@@ -9,9 +10,23 @@ import typer
 
 from agentreview import __version__
 from agentreview.ai import AIProviderConfigError, AIProviderRequestError
+from agentreview.analysis_output import write_analysis_json_output
 from agentreview.analysis import analyze_diff_text
 from agentreview.config import ConfigError, DEFAULT_CONFIG_PATH, load_config
-from agentreview.integrations.github import GitHubIntegrationError, MissingGitHubTokenError, fetch_pull_request_diff, upsert_pull_request_comment
+from agentreview.github_reviewers import (
+    GitHubReviewerRequestPlan,
+    filter_github_reviewer_request_plan,
+    resolve_github_reviewer_request_plan,
+)
+from agentreview.integrations.github import (
+    GITHUB_API_BASE_URL,
+    GitHubIntegrationError,
+    MissingGitHubTokenError,
+    fetch_pull_request_diff,
+    request_pull_request_reviewers,
+    upsert_pull_request_comment,
+)
+from agentreview.models import ReviewRequirement
 from agentreview.plugins import PluginError
 from agentreview.routing import load_codeowners_text
 
@@ -30,6 +45,12 @@ class FailOnLevel(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
     BLOCK = "block"
+
+
+class ReviewerRequestMode(str, Enum):
+    USERS = "users"
+    TEAMS = "teams"
+    USERS_AND_TEAMS = "users-and-teams"
 
 
 RISK_LEVEL_ORDER = {
@@ -162,6 +183,12 @@ def scan_diff(
         resolve_path=True,
         help="Optional CODEOWNERS file for human review routing. Defaults to standard CODEOWNERS paths.",
     ),
+    json_output: Path | None = typer.Option(
+        None,
+        "--json-output",
+        dir_okay=False,
+        help="Optional path where structured JSON analysis output will be written.",
+    ),
 ) -> None:
     """Analyze a unified diff and write a Markdown review report."""
     try:
@@ -194,6 +221,7 @@ def scan_diff(
     except OSError as exc:
         typer.echo(f"Could not write report to {output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    _write_json_output_for_cli(json_output, result, fail_on=fail_on.value, source="scan-diff")
 
     typer.echo("AgentReviewOps")
     typer.echo(f"Risk: {result.analysis.risk_level.upper()} {result.analysis.risk_score}/100")
@@ -355,6 +383,12 @@ def scan_pr(
         "--comment/--no-comment",
         help="Post or update the generated report as a GitHub pull request comment.",
     ),
+    json_output: Path | None = typer.Option(
+        None,
+        "--json-output",
+        dir_okay=False,
+        help="Optional path where structured JSON analysis output will be written.",
+    ),
 ) -> None:
     """Fetch a GitHub pull request diff and write a Markdown review report."""
     try:
@@ -387,6 +421,7 @@ def scan_pr(
     except OSError as exc:
         typer.echo(f"Could not write report to {output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    _write_json_output_for_cli(json_output, result, fail_on=fail_on.value, source="scan-pr")
 
     typer.echo("AgentReviewOps")
     typer.echo(f"GitHub PR: {repo}#{pr_number}")
@@ -408,6 +443,85 @@ def scan_pr(
             raise typer.Exit(code=1) from exc
         typer.echo(f"GitHub comment: {comment_url}")
     _enforce_fail_on(result.analysis.risk_level, result.analysis.risk_score, fail_on)
+
+
+@app.command("request-reviewers")
+def request_reviewers(
+    repo: str = typer.Option(
+        ...,
+        "--repo",
+        help="GitHub repository in owner/name format.",
+    ),
+    pr_number: int = typer.Option(
+        ...,
+        "--pr",
+        min=1,
+        help="Pull request number to request reviewers on.",
+    ),
+    analysis_file: Path = typer.Option(
+        ...,
+        "--analysis-file",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Structured JSON analysis file produced by --json-output.",
+    ),
+    github_token: str | None = typer.Option(
+        None,
+        "--github-token",
+        help="GitHub token. Prefer GITHUB_TOKEN in CI.",
+    ),
+    api_base_url: str = typer.Option(
+        GITHUB_API_BASE_URL,
+        "--api-base-url",
+        help="GitHub API base URL, for example a GitHub Enterprise API URL.",
+    ),
+    reviewer_request_mode: ReviewerRequestMode = typer.Option(
+        ReviewerRequestMode.USERS_AND_TEAMS,
+        "--reviewer-request-mode",
+        help="Which reviewers to request: users, teams, or users-and-teams.",
+    ),
+    author: str | None = typer.Option(
+        None,
+        "--author",
+        help="Pull request author login to exclude from reviewer requests.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Resolve and print reviewer requests without calling the GitHub API.",
+    ),
+) -> None:
+    """Request GitHub reviewers from structured AgentReviewOps analysis output."""
+    review_requirements = _load_review_requirements_from_analysis_file(analysis_file)
+    resolved_plan = resolve_github_reviewer_request_plan(review_requirements, author=author)
+    plan = filter_github_reviewer_request_plan(resolved_plan, mode=reviewer_request_mode.value)
+
+    api_call_status = "dry-run"
+    if not dry_run:
+        try:
+            response = request_pull_request_reviewers(
+                repo=repo,
+                pr_number=pr_number,
+                reviewers=plan.reviewers,
+                team_reviewers=plan.team_reviewers,
+                token=github_token,
+                api_base_url=api_base_url,
+            )
+        except MissingGitHubTokenError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except GitHubIntegrationError as exc:
+            typer.echo(f"GitHub error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        api_call_status = "requested" if response.get("requested") else "no-op"
+
+    typer.echo("AgentReviewOps")
+    typer.echo(f"GitHub PR: {repo}#{pr_number}")
+    typer.echo(f"Reviewer request mode: {reviewer_request_mode.value}")
+    _echo_reviewer_request_summary(plan, api_call_status=api_call_status)
 
 
 @app.command("comment-pr")
@@ -484,6 +598,68 @@ def _load_codeowners_for_cli(codeowners_file: Path | None, configured_path: str 
         return load_codeowners_text()
     except OSError:
         return None
+
+
+def _write_json_output_for_cli(
+    json_output: Path | None,
+    result,
+    *,
+    fail_on: str,
+    source: str,
+) -> None:
+    if json_output is None:
+        return
+    try:
+        write_analysis_json_output(json_output, result, fail_on=fail_on, source=source)
+    except OSError as exc:
+        typer.echo(f"Could not write JSON analysis output to {json_output}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _load_review_requirements_from_analysis_file(analysis_file: Path) -> list[ReviewRequirement]:
+    try:
+        payload = json.loads(analysis_file.read_text(encoding="utf-8"))
+    except OSError as exc:
+        typer.echo(f"Could not read analysis file {analysis_file}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except json.JSONDecodeError as exc:
+        typer.echo(f"Analysis file {analysis_file} is not valid JSON: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    if not isinstance(payload, dict):
+        typer.echo(f"Analysis file {analysis_file} must contain a JSON object.", err=True)
+        raise typer.Exit(code=2)
+    review_requirements_json = payload.get("review_requirements")
+    if not isinstance(review_requirements_json, list):
+        typer.echo(f"Analysis file {analysis_file} is missing review_requirements.", err=True)
+        raise typer.Exit(code=2)
+    try:
+        return [
+            ReviewRequirement.model_validate(requirement)
+            for requirement in review_requirements_json
+        ]
+    except ValueError as exc:
+        typer.echo(f"Analysis file {analysis_file} has invalid review_requirements: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
+def _echo_reviewer_request_summary(plan: GitHubReviewerRequestPlan, *, api_call_status: str) -> None:
+    typer.echo(f"Requested individual reviewers: {_format_list(plan.reviewers)}")
+    typer.echo(f"Requested team reviewers: {_format_list(plan.team_reviewers)}")
+    typer.echo("Skipped reviewers:")
+    if plan.skipped:
+        for skipped_reviewer in plan.skipped:
+            typer.echo(
+                f"- {skipped_reviewer.identifier}: "
+                f"{skipped_reviewer.reason} ({skipped_reviewer.source})"
+            )
+    else:
+        typer.echo("- none")
+    typer.echo(f"GitHub API call: {api_call_status}")
+
+
+def _format_list(values: list[str]) -> str:
+    return ", ".join(values) if values else "none"
 
 
 def _enforce_fail_on(risk_level: str, risk_score: int, fail_on: FailOnLevel) -> None:

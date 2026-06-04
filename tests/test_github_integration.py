@@ -14,6 +14,7 @@ from agentreview.integrations.github import (
     GitHubIntegrationError,
     MissingGitHubTokenError,
     fetch_pull_request_diff,
+    request_pull_request_reviewers,
     upsert_pull_request_comment,
 )
 
@@ -166,9 +167,89 @@ def test_upsert_pull_request_comment_patches_existing_agentreview_comment() -> N
     assert "updated report" in json.loads(calls[1]["body"])["body"]
 
 
+def test_request_pull_request_reviewers_posts_users_and_teams() -> None:
+    calls = []
+
+    def fake_opener(request, timeout):
+        calls.append(
+            {
+                "url": request.full_url,
+                "method": request.get_method(),
+                "headers": dict(request.header_items()),
+                "body": request.data.decode("utf-8") if request.data else "",
+                "timeout": timeout,
+            }
+        )
+        return FakeResponse(json.dumps({"requested_reviewers": [{"login": "alice"}]}))
+
+    result = request_pull_request_reviewers(
+        repo="octo/example",
+        pr_number=123,
+        reviewers=["alice", "alice"],
+        team_reviewers=["security-team"],
+        token="secret-token",
+        opener=fake_opener,
+    )
+
+    assert result["requested"] is True
+    assert result["reviewers"] == ["alice"]
+    assert result["team_reviewers"] == ["security-team"]
+    assert calls[0]["url"] == "https://api.github.com/repos/octo/example/pulls/123/requested_reviewers"
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["headers"]["Accept"] == GITHUB_JSON_ACCEPT
+    assert calls[0]["headers"]["Authorization"] == "Bearer secret-token"
+    assert calls[0]["timeout"] == 30
+    assert json.loads(calls[0]["body"]) == {
+        "reviewers": ["alice"],
+        "team_reviewers": ["security-team"],
+    }
+
+
+def test_request_pull_request_reviewers_noops_when_empty_without_token(monkeypatch) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    result = request_pull_request_reviewers(
+        repo="octo/example",
+        pr_number=123,
+        reviewers=[],
+        team_reviewers=[],
+    )
+
+    assert result["requested"] is False
+    assert result["message"] == "No GitHub reviewers to request."
+
+
+def test_request_pull_request_reviewers_http_error_does_not_include_token() -> None:
+    def fake_opener(_request, timeout):
+        assert timeout == 30
+        raise HTTPError(
+            url="https://api.github.com/repos/octo/example/pulls/123/requested_reviewers",
+            code=422,
+            msg="Validation Failed",
+            hdrs=None,
+            fp=None,
+        )
+
+    try:
+        request_pull_request_reviewers(
+            repo="octo/example",
+            pr_number=123,
+            reviewers=["alice"],
+            team_reviewers=[],
+            token="secret-token",
+            opener=fake_opener,
+        )
+    except GitHubIntegrationError as exc:
+        assert "HTTP 422" in str(exc)
+        assert "secret-token" not in str(exc)
+    else:
+        raise AssertionError("Expected GitHubIntegrationError")
+
+
 def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Path) -> None:
     runner = CliRunner()
     output_path = tmp_path / "pr-report.md"
+    json_output_path = tmp_path / "pr-report.json"
     monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
     monkeypatch.setattr("agentreview.cli.fetch_pull_request_diff", lambda **_kwargs: SAMPLE_DIFF)
 
@@ -182,6 +263,8 @@ def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Pat
             "123",
             "--output",
             str(output_path),
+            "--json-output",
+            str(json_output_path),
         ],
     )
 
@@ -189,6 +272,9 @@ def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Pat
     assert "GitHub PR: octo/example#123" in result.output
     assert "secret-token" not in result.output
     assert output_path.exists()
+    payload = json.loads(json_output_path.read_text(encoding="utf-8"))
+    assert payload["metadata"]["source"] == "scan-pr"
+    assert payload["changed_files"][0]["path"] == "README.md"
 
 
 def test_scan_pr_fail_on_high_exits_after_writing_report(monkeypatch, tmp_path: Path) -> None:

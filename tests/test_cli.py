@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -25,6 +26,7 @@ def test_help_shows_product_name() -> None:
     assert "submit-diff" in result.output
     assert "scan-pr" in result.output
     assert "comment-pr" in result.output
+    assert "request-reviewers" in result.output
 
 
 def test_version_shows_package_version() -> None:
@@ -60,6 +62,54 @@ def test_scan_diff_writes_report(tmp_path: Path) -> None:
     assert "HIGH critical-path-change: auth/session.py" in result.output
     assert f"Report written to: {output_path}" in result.output
     assert output_path.read_text(encoding="utf-8").startswith("# AgentReviewOps Report")
+
+
+def test_scan_diff_writes_structured_json_output(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    output_path = tmp_path / "agentreview-report.md"
+    json_output_path = tmp_path / "artifacts" / "agentreview-report.json"
+    codeowners_path = tmp_path / "CODEOWNERS"
+    codeowners_path.write_text(
+        "auth/** @alice @octo/security-team owner@example.com\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--config",
+            str(project_root / ".agentreview.example.yml"),
+            "--output",
+            str(output_path),
+            "--codeowners-file",
+            str(codeowners_path),
+            "--json-output",
+            str(json_output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert str(json_output_path) not in result.output
+    payload = json.loads(json_output_path.read_text(encoding="utf-8"))
+    assert payload["risk_score"] == 55
+    assert payload["risk_level"] == "high"
+    assert payload["decision"] == {"fail_on": "never", "should_fail": False}
+    assert payload["summary"] == "1 changed file(s), high risk (55/100)."
+    assert payload["changed_files"][0]["path"] == "auth/session.py"
+    assert {finding["rule_id"] for finding in payload["findings"]} >= {"critical-path-change"}
+    assert payload["metadata"]["source"] == "scan-diff"
+    assert payload["metadata"]["agentreview_version"] == "0.1.0"
+    assert payload["metadata"]["generated_at"].endswith("Z")
+    reviewer_identifiers = {
+        reviewer["identifier"]
+        for requirement in payload["review_requirements"]
+        for reviewer in requirement["suggested_reviewers"]
+    }
+    assert {"@alice", "@octo/security-team", "owner@example.com"} <= reviewer_identifiers
 
 
 def test_scan_diff_missing_config_uses_defaults(tmp_path: Path) -> None:
@@ -436,6 +486,72 @@ def test_submit_diff_posts_to_self_hosted_api(monkeypatch) -> None:
     assert calls[0]["json"]["diff"].startswith("diff --git")
 
 
+def test_request_reviewers_dry_run_prints_resolved_plan(tmp_path: Path) -> None:
+    runner = CliRunner()
+    analysis_file = _write_analysis_json(
+        tmp_path,
+        [
+            {
+                "requirement_id": "security-review",
+                "title": "Security review",
+                "reason": "Sensitive change",
+                "suggested_reviewers": [
+                    {"source": "codeowners", "identifier": "@alice"},
+                    {"source": "codeowners", "identifier": "@octo/security-team"},
+                    {"source": "repository_membership", "identifier": "owner@example.com", "role": "maintainer"},
+                ],
+            }
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "request-reviewers",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--analysis-file",
+            str(analysis_file),
+            "--author",
+            "alice",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Requested individual reviewers: none" in result.output
+    assert "Requested team reviewers: security-team" in result.output
+    assert "- @alice: pull_request_author (codeowners)" in result.output
+    assert "- owner@example.com: email_identifier_not_requestable (repository_membership)" in result.output
+    assert "GitHub API call: dry-run" in result.output
+
+
+def test_request_reviewers_noop_does_not_require_token(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    analysis_file = _write_analysis_json(tmp_path, [])
+
+    result = runner.invoke(
+        app,
+        [
+            "request-reviewers",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--analysis-file",
+            str(analysis_file),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Requested individual reviewers: none" in result.output
+    assert "Requested team reviewers: none" in result.output
+    assert "GitHub API call: no-op" in result.output
+
+
 def test_submit_diff_requires_api_key(monkeypatch) -> None:
     runner = CliRunner()
     project_root = Path(__file__).parents[1]
@@ -525,6 +641,21 @@ def _write_diff(tmp_path: Path, name: str, diff_text: str) -> Path:
     diff_path = tmp_path / name
     diff_path.write_text(diff_text, encoding="utf-8")
     return diff_path
+
+
+def _write_analysis_json(tmp_path: Path, review_requirements: list[dict]) -> Path:
+    analysis_path = tmp_path / "agentreview-report.json"
+    analysis_path.write_text(
+        json.dumps(
+            {
+                "risk_score": 55,
+                "risk_level": "high",
+                "review_requirements": review_requirements,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return analysis_path
 
 
 def _medium_risk_diff() -> str:

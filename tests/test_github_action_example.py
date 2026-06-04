@@ -36,6 +36,8 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert action["runs"]["using"] == "composite"
     assert "github-token" in action["inputs"]
     assert action["inputs"]["comment"]["default"] == "true"
+    assert action["inputs"]["request-reviewers"]["default"] == "false"
+    assert action["inputs"]["reviewer-request-mode"]["default"] == "users-and-teams"
     assert action["inputs"]["fail-on"]["default"] == "never"
     assert action["inputs"]["codeowners-file"]["default"] == ""
     assert "diff-file" in action["inputs"]
@@ -45,6 +47,9 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert 'python -m pip install -e "$GITHUB_ACTION_PATH"' in steps
     assert "git diff --no-ext-diff" in steps
     assert "agentreview scan-diff" in steps
+    assert "--json-output" in steps
+    assert "agentreview request-reviewers" in steps
+    assert "--reviewer-request-mode" in steps
     assert "--fail-on" in steps
     assert "--codeowners-file" in steps
     assert "agentreview submit-diff" in steps
@@ -62,6 +67,8 @@ def test_github_action_docs_explain_artifact_flow() -> None:
     assert "agentreview scan-diff" in docs
     assert "agentreview submit-diff" in docs
     assert "agentreview comment-pr" in docs
+    assert "agentreview request-reviewers" in docs
+    assert "request-reviewers: \"true\"" in docs
     assert "$GITHUB_ACTION_PATH" in docs
     assert "actions/checkout@v6" in docs
     assert "actions/setup-python@v6" in docs

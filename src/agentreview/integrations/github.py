@@ -99,6 +99,58 @@ def upsert_pull_request_comment(
     return html_url
 
 
+def request_pull_request_reviewers(
+    *,
+    repo: str,
+    pr_number: int,
+    reviewers: list[str],
+    team_reviewers: list[str],
+    token: str | None = None,
+    api_base_url: str = GITHUB_API_BASE_URL,
+    opener: Callable[..., Any] | None = None,
+) -> dict:
+    _validate_repository_and_pr(repo=repo, pr_number=pr_number)
+    reviewer_payload = _dedupe_case_insensitive(reviewers)
+    team_reviewer_payload = _dedupe_case_insensitive(team_reviewers)
+    if not reviewer_payload and not team_reviewer_payload:
+        return {
+            "requested": False,
+            "reviewers": [],
+            "team_reviewers": [],
+            "message": "No GitHub reviewers to request.",
+        }
+
+    active_token = token or os.environ.get("GITHUB_TOKEN")
+    _validate_pull_request_inputs(repo=repo, pr_number=pr_number, token=active_token)
+    request = _json_request(
+        f"{api_base_url.rstrip('/')}/repos/{repo}/pulls/{pr_number}/requested_reviewers",
+        token=active_token or "",
+        method="POST",
+        payload={
+            "reviewers": reviewer_payload,
+            "team_reviewers": team_reviewer_payload,
+        },
+    )
+    active_opener = opener or urlopen
+
+    try:
+        with active_opener(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise GitHubIntegrationError(_http_error_message(exc)) from exc
+    except (URLError, json.JSONDecodeError) as exc:
+        raise GitHubIntegrationError(f"GitHub API request failed: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise GitHubIntegrationError("GitHub reviewer request response was not an object")
+    return {
+        "requested": True,
+        "reviewers": reviewer_payload,
+        "team_reviewers": team_reviewer_payload,
+        "response": payload,
+    }
+
+
 def _find_existing_comment(
     *,
     repo: str,
@@ -148,9 +200,35 @@ def _comment_body(body: str, *, marker: str) -> str:
 
 
 def _validate_pull_request_inputs(*, repo: str, pr_number: int, token: str | None) -> None:
+    _validate_repository_and_pr(repo=repo, pr_number=pr_number)
     if not token:
         raise MissingGitHubTokenError("GITHUB_TOKEN is required to access GitHub pull requests")
+
+
+def _validate_repository_and_pr(*, repo: str, pr_number: int) -> None:
     if "/" not in repo or repo.count("/") != 1:
         raise GitHubIntegrationError("Repository must use the owner/name format")
     if pr_number <= 0:
         raise GitHubIntegrationError("Pull request number must be greater than zero")
+
+
+def _dedupe_case_insensitive(values: list[str]) -> list[str]:
+    deduped: dict[str, str] = {}
+    for value in values:
+        normalized = value.strip()
+        if not normalized:
+            continue
+        deduped.setdefault(normalized.casefold(), normalized)
+    return [deduped[key] for key in sorted(deduped)]
+
+
+def _http_error_message(exc: HTTPError) -> str:
+    detail = ""
+    if exc.fp is not None:
+        try:
+            payload = json.loads(exc.fp.read().decode("utf-8"))
+        except (AttributeError, json.JSONDecodeError, UnicodeDecodeError):
+            payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("message"), str):
+            detail = f": {payload['message']}"
+    return f"GitHub API request failed with HTTP {exc.code}{detail}"

@@ -50,8 +50,16 @@ inputs:
     description: Set to true to post or update the generated report as a GitHub pull request comment.
     required: false
     default: "false"
+  request-reviewers:
+    description: Request GitHub reviewers from AgentReviewOps review routing output.
+    required: false
+    default: "false"
+  reviewer-request-mode:
+    description: "Which reviewers to request: users, teams, or users-and-teams."
+    required: false
+    default: users-and-teams
   github-token:
-    description: GitHub token used when github-comment is true. Prefer github.token or a GitHub secret.
+    description: GitHub token used when github-comment or request-reviewers is true. Prefer github.token or a GitHub secret.
     required: false
     default: ""
 
@@ -64,7 +72,36 @@ runs:
 
     - name: Run AgentReviewOps scan
       shell: bash
-      run: agentreview scan-diff --diff-file "${{ inputs.diff-file }}" --config "${{ inputs.config }}" --output "${{ inputs.output }}"
+      env:
+        AGENTREVIEW_INPUT_CONFIG: ${{ inputs.config }}
+        AGENTREVIEW_INPUT_DIFF_FILE: ${{ inputs.diff-file }}
+        AGENTREVIEW_INPUT_OUTPUT: ${{ inputs.output }}
+        AGENTREVIEW_INPUT_REQUEST_REVIEWERS: ${{ inputs.request-reviewers }}
+      run: |
+        args=(
+          --diff-file "$AGENTREVIEW_INPUT_DIFF_FILE"
+          --config "$AGENTREVIEW_INPUT_CONFIG"
+          --output "$AGENTREVIEW_INPUT_OUTPUT"
+        )
+        if [ "$AGENTREVIEW_INPUT_REQUEST_REVIEWERS" = "true" ]; then
+          args+=(--json-output "${RUNNER_TEMP:-.}/agentreview-analysis.json")
+        fi
+        agentreview scan-diff "${args[@]}"
+
+    - name: Request GitHub reviewers
+      if: ${{ inputs.request-reviewers == 'true' && inputs.github-token != '' && inputs.repository != '' && inputs.pr-number != '' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        AGENTREVIEW_INPUT_REPOSITORY: ${{ inputs.repository }}
+        AGENTREVIEW_INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        AGENTREVIEW_INPUT_REVIEWER_REQUEST_MODE: ${{ inputs.reviewer-request-mode }}
+      run: |
+        agentreview request-reviewers \
+          --repo "$AGENTREVIEW_INPUT_REPOSITORY" \
+          --pr "$AGENTREVIEW_INPUT_PR_NUMBER" \
+          --analysis-file "${RUNNER_TEMP:-.}/agentreview-analysis.json" \
+          --reviewer-request-mode "$AGENTREVIEW_INPUT_REVIEWER_REQUEST_MODE"
 
     - name: Submit AgentReviewOps analysis
       if: ${{ inputs.api-url != '' && inputs.api-key != '' }}

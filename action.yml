@@ -3,7 +3,7 @@ description: Policy-as-code risk gate for AI-generated pull requests.
 
 inputs:
   github-token:
-    description: GitHub token used to post or update the pull request comment.
+    description: GitHub token used to post or update the pull request comment and optionally request reviewers.
     required: false
     default: ""
   config:
@@ -22,6 +22,14 @@ inputs:
     description: Set to true to post or update the generated report as a GitHub pull request comment.
     required: false
     default: "true"
+  request-reviewers:
+    description: Request GitHub reviewers from AgentReviewOps review routing output.
+    required: false
+    default: "false"
+  reviewer-request-mode:
+    description: "Which reviewers to request: users, teams, or users-and-teams."
+    required: false
+    default: users-and-teams
   fail-on:
     description: Fail the job when risk is at or above this level. One of low, medium, high, block, never.
     required: false
@@ -78,6 +86,7 @@ runs:
         BASE_SHA=""
         HEAD_SHA=""
         EVENT_PR_NUMBER=""
+        PR_AUTHOR=""
         if [ -n "$AGENTREVIEW_EVENT_PATH" ] && [ -f "$AGENTREVIEW_EVENT_PATH" ]; then
           metadata_file="${RUNNER_TEMP:-.}/agentreview-event.env"
           python - <<'PY' > "$metadata_file"
@@ -88,6 +97,7 @@ runs:
         base_sha = ""
         head_sha = ""
         pr_number = ""
+        pr_author = ""
         event_path = os.environ.get("AGENTREVIEW_EVENT_PATH")
         if event_path:
             with open(event_path, encoding="utf-8") as event_file:
@@ -96,11 +106,13 @@ runs:
             base_sha = ((pull_request.get("base") or {}).get("sha") or "")
             head_sha = ((pull_request.get("head") or {}).get("sha") or "")
             pr_number = str(pull_request.get("number") or event.get("number") or "")
+            pr_author = ((pull_request.get("user") or {}).get("login") or "")
 
         for key, value in {
             "BASE_SHA": base_sha,
             "HEAD_SHA": head_sha,
             "EVENT_PR_NUMBER": pr_number,
+            "PR_AUTHOR": pr_author,
         }.items():
             print(f"{key}={shlex.quote(value)}")
         PY
@@ -129,6 +141,7 @@ runs:
         echo "diff-file=$diff_file" >> "$GITHUB_OUTPUT"
         echo "repository=$repository" >> "$GITHUB_OUTPUT"
         echo "pr-number=$pr_number" >> "$GITHUB_OUTPUT"
+        echo "pr-author=$PR_AUTHOR" >> "$GITHUB_OUTPUT"
 
     - name: Run AgentReviewOps scan
       id: scan
@@ -139,6 +152,7 @@ runs:
         AGENTREVIEW_CODEOWNERS_FILE: ${{ inputs.codeowners-file }}
         AGENTREVIEW_FAIL_ON: ${{ inputs.fail-on }}
         AGENTREVIEW_OUTPUT: ${{ inputs.output }}
+        AGENTREVIEW_REQUEST_REVIEWERS: ${{ inputs.request-reviewers }}
       run: |
         set +e
         args=(
@@ -148,17 +162,51 @@ runs:
           --fail-on "$AGENTREVIEW_FAIL_ON"
         )
         if [ -n "$AGENTREVIEW_CODEOWNERS_FILE" ]; then args+=(--codeowners-file "$AGENTREVIEW_CODEOWNERS_FILE"); fi
+        analysis_file=""
+        if [ "$AGENTREVIEW_REQUEST_REVIEWERS" = "true" ]; then
+          analysis_file="${RUNNER_TEMP:-.}/agentreview-analysis.json"
+          args+=(--json-output "$analysis_file")
+        fi
         agentreview scan-diff "${args[@]}"
         status=$?
         set -e
 
         echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        echo "analysis-file=$analysis_file" >> "$GITHUB_OUTPUT"
         if [ "$status" -eq 1 ] && [ ! -s "$AGENTREVIEW_OUTPUT" ]; then
           exit "$status"
         fi
         if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
           exit "$status"
         fi
+
+    - name: Validate reviewer request inputs
+      if: ${{ inputs.request-reviewers == 'true' && (inputs.github-token == '' || steps.prepare.outputs.pr-number == '' || steps.prepare.outputs.repository == '') }}
+      shell: bash
+      run: |
+        echo "AgentReviewOps request-reviewers=true requires github-token, repository, and a pull request number." >&2
+        exit 2
+
+    - name: Request GitHub reviewers
+      if: ${{ inputs.request-reviewers == 'true' && inputs.github-token != '' && steps.prepare.outputs.pr-number != '' && steps.prepare.outputs.repository != '' }}
+      shell: bash
+      env:
+        AGENTREVIEW_ANALYSIS_FILE: ${{ steps.scan.outputs.analysis-file }}
+        AGENTREVIEW_PR_AUTHOR: ${{ steps.prepare.outputs.pr-author }}
+        AGENTREVIEW_PR_NUMBER: ${{ steps.prepare.outputs.pr-number }}
+        AGENTREVIEW_REPOSITORY: ${{ steps.prepare.outputs.repository }}
+        AGENTREVIEW_REVIEWER_REQUEST_MODE: ${{ inputs.reviewer-request-mode }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        args=(
+          --repo "$AGENTREVIEW_REPOSITORY"
+          --pr "$AGENTREVIEW_PR_NUMBER"
+          --analysis-file "$AGENTREVIEW_ANALYSIS_FILE"
+          --reviewer-request-mode "$AGENTREVIEW_REVIEWER_REQUEST_MODE"
+        )
+        if [ -n "$AGENTREVIEW_PR_AUTHOR" ]; then args+=(--author "$AGENTREVIEW_PR_AUTHOR"); fi
+        agentreview request-reviewers "${args[@]}"
 
     - name: Submit AgentReviewOps analysis
       if: ${{ inputs.api-url != '' && inputs.api-key != '' }}
