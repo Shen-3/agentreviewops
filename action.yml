@@ -42,6 +42,10 @@ inputs:
     description: "Which reviewers to request: users, teams, or users-and-teams."
     required: false
     default: users-and-teams
+  reviewer-request-failure-mode:
+    description: Whether reviewer request failures should fail the job or only warn. One of warn, fail.
+    required: false
+    default: warn
   checks:
     description: Publish an AgentReviewOps GitHub Check Run.
     required: false
@@ -228,9 +232,13 @@ runs:
     - name: Validate reviewer request inputs
       if: ${{ inputs.request-reviewers == 'true' && (inputs.github-token == '' || steps.prepare.outputs.pr-number == '' || steps.prepare.outputs.repository == '') }}
       shell: bash
+      env:
+        AGENTREVIEW_REVIEWER_REQUEST_FAILURE_MODE: ${{ inputs.reviewer-request-failure-mode }}
       run: |
         echo "AgentReviewOps request-reviewers=true requires github-token, repository, and a pull request number." >&2
-        exit 2
+        if [ "$AGENTREVIEW_REVIEWER_REQUEST_FAILURE_MODE" = "fail" ]; then
+          exit 2
+        fi
 
     - name: Request GitHub reviewers
       if: ${{ inputs.request-reviewers == 'true' && inputs.github-token != '' && steps.prepare.outputs.pr-number != '' && steps.prepare.outputs.repository != '' }}
@@ -240,6 +248,7 @@ runs:
         AGENTREVIEW_PR_AUTHOR: ${{ steps.prepare.outputs.pr-author }}
         AGENTREVIEW_PR_NUMBER: ${{ steps.prepare.outputs.pr-number }}
         AGENTREVIEW_REPOSITORY: ${{ steps.prepare.outputs.repository }}
+        AGENTREVIEW_REVIEWER_REQUEST_FAILURE_MODE: ${{ inputs.reviewer-request-failure-mode }}
         AGENTREVIEW_REVIEWER_REQUEST_MODE: ${{ inputs.reviewer-request-mode }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
@@ -249,6 +258,7 @@ runs:
           --pr "$AGENTREVIEW_PR_NUMBER"
           --analysis-file "$AGENTREVIEW_ANALYSIS_FILE"
           --reviewer-request-mode "$AGENTREVIEW_REVIEWER_REQUEST_MODE"
+          --reviewer-request-failure-mode "$AGENTREVIEW_REVIEWER_REQUEST_FAILURE_MODE"
         )
         if [ -n "$AGENTREVIEW_PR_AUTHOR" ]; then args+=(--author "$AGENTREVIEW_PR_AUTHOR"); fi
         agentreview request-reviewers "${args[@]}"

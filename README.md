@@ -17,7 +17,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  checks: write
 
 jobs:
   review-gate:
@@ -32,20 +31,45 @@ jobs:
           github-token: ${{ github.token }}
           config: .agentreview.yml
           comment: "true"
-          checks: "true"
-          sarif-output: agentreview.sarif.json
-          request-reviewers: "true"
-          reviewer-request-mode: users-and-teams
           fail-on: high
-          codeowners-file: .github/CODEOWNERS
-
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: agentreview.sarif.json
 ```
 
 `fail-on` controls the CI threshold. For example, `fail-on: high` exits non-zero for `high` or `block` risk after the Markdown report and optional PR comment are produced.
+
+Add the governance gate options when you want CODEOWNERS routing, GitHub Checks, and reviewer requests:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+steps:
+  - uses: Shen-3/agentreviewops@v0
+    with:
+      github-token: ${{ github.token }}
+      comment: "true"
+      checks: "true"
+      request-reviewers: "true"
+      reviewer-request-mode: users-and-teams
+      reviewer-request-failure-mode: warn
+      fail-on: high
+      codeowners-file: .github/CODEOWNERS
+```
+
+Add SARIF export only when you also upload Code Scanning results:
+
+```yaml
+- uses: Shen-3/agentreviewops@v0
+  with:
+    github-token: ${{ github.token }}
+    sarif-output: agentreview.sarif.json
+
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: agentreview.sarif.json
+```
 
 Reviewer requests and GitHub Checks are opt-in. Keep `request-reviewers: "false"` and `checks: "false"` or omit them when you only want report/comment behavior. Workflows that comment or request reviewers need `pull-requests: write`; workflows that publish check runs need `checks: write`:
 
@@ -151,7 +175,7 @@ Expected scan output includes the risk level, positive findings, and the report 
 
 `scan-pr` fetches the pull request diff from the GitHub API using `GITHUB_TOKEN`. The token is required at runtime and is not printed in command output.
 
-`request-reviewers` reads the JSON created by `--json-output`, resolves review routing suggestions, and calls GitHub's requested reviewers API. CODEOWNERS `@username` entries become individual reviewers and `@org/team-slug` entries become team reviewers. Email addresses are skipped with `email_identifier_not_requestable`; repository membership suggestions without a GitHub login are skipped with `missing_github_login`. AgentReviewOps does not map emails to GitHub users automatically.
+`request-reviewers` reads the JSON created by `--json-output`, resolves review routing suggestions, and calls GitHub's requested reviewers API. CODEOWNERS `@username` entries become individual reviewers and `@org/team-slug` entries become team reviewers. Repository membership `@github-login` suggestions become individual reviewers; repository membership email suggestions are skipped with `missing_github_login`. Other email addresses are skipped with `email_identifier_not_requestable`. AgentReviewOps does not map emails to GitHub users automatically. Use `--reviewer-request-failure-mode warn` when reviewer request permission errors should not fail the command.
 
 `comment-pr` posts or updates the generated report as a GitHub pull request comment using a hidden AgentReviewOps marker, so repeated CI runs update the prior comment rather than creating duplicates.
 
@@ -184,6 +208,10 @@ Implemented endpoints:
 - `GET /api/audit-events`
 - `GET /api/audit-events/export`
 - `POST /api/retention/purge`
+- `GET /api/metrics/overview`
+- `GET /api/metrics/rules`
+- `GET /api/metrics/routing`
+- `GET /api/metrics/repositories`
 - `GET /api/policies`
 - `POST /api/policies`
 - `PATCH /api/policies/{policy_id}`
@@ -262,7 +290,9 @@ The key is printed once and stored only as a hash. See [self-hosting docs](docs/
 
 Issue additional organization API keys with `POST /api/api-keys`, list existing keys with `GET /api/api-keys`, update key names or roles with `PATCH /api/api-keys/{api_key_id}`, and revoke inactive keys with `POST /api/api-keys/{api_key_id}/revoke`. Created keys are returned once and are stored only as hashes. API key roles are `admin`, `ci`, and `read_only`: admin keys can manage governance settings, CI keys can submit analyses, and read-only keys can inspect existing data.
 
-Create organization users with `POST /api/users`, update user roles with `PATCH /api/users/{user_id}`, then assign them to onboarded repositories with `POST /api/repositories/{repository_id}/memberships`. Repository membership roles are `owner`, `maintainer`, and `reviewer`; those assignments are returned in repository list responses and used as reviewer routing metadata during analysis. Update reviewer roles with `PATCH /api/repositories/{repository_id}/memberships/{user_id}`. Remove stale users with `DELETE /api/users/{user_id}`, remove stale reviewer assignments with `DELETE /api/repositories/{repository_id}/memberships/{user_id}`, and remove stale onboarded repositories with `DELETE /api/repositories/{repository_id}`.
+Create organization users with `POST /api/users`, update user roles with `PATCH /api/users/{user_id}`, then assign them to onboarded repositories with `POST /api/repositories/{repository_id}/memberships`. Users can include optional `github_login`; AgentReviewOps stores it without a leading `@`, preserves case, validates GitHub username syntax, and rejects duplicate logins within the same organization case-insensitively. No automatic email-to-GitHub mapping is performed. Repository membership roles are `owner`, `maintainer`, and `reviewer`; those assignments are returned in repository list responses and used as reviewer routing metadata during analysis. When `github_login` is set, repository membership suggestions use `@login` and can become GitHub reviewer requests. Without it, reports keep the member email for humans and reviewer requests skip the entry as `missing_github_login`. Update reviewer roles with `PATCH /api/repositories/{repository_id}/memberships/{user_id}`. Remove stale users with `DELETE /api/users/{user_id}`, remove stale reviewer assignments with `DELETE /api/repositories/{repository_id}/memberships/{user_id}`, and remove stale onboarded repositories with `DELETE /api/repositories/{repository_id}`.
+
+Metrics endpoints are read-only, organization-scoped, and accept `days` from 1 to 365, defaulting to 30. They expose overview risk distribution and trends, top triggered rules and severity distribution, routing hit rate plus unconfigured requirements, and repository-level risk rows. Routing hit rate is `configured review requirements / total review requirements` and is `0` when no requirements exist.
 
 ## Review routing
 
@@ -314,7 +344,7 @@ pnpm --filter agentreviewops-web dev
 
 Then open `http://127.0.0.1:5173`.
 
-The dashboard sends the supplied API key as a Bearer token for live API data. API keys are stored in the browser for this self-hosted dashboard: choose session-only mode on shared machines, use browser storage only on trusted devices, and clear the key when finished. Without a key, it falls back to seeded demo data. With a live key, it reads `/api/auth/me` and enables only the actions allowed by that key role: admin keys manage governance and submit analyses, CI keys submit analyses, and read-only keys inspect existing data and export audit evidence. Full OAuth or GitHub App browser auth is future work. The dashboard includes diff submission, analysis list, selected analysis detail, risk badges, findings table, report preview, user management, repository onboarding with reviewer routing assignment, organization and repository policy assignment, role-scoped API key management, audit history with JSON/CSV export, and loading/error/empty states.
+The dashboard sends the supplied API key as a Bearer token for live API data. Session-only storage is the default; browser storage keeps the key after the tab closes and should be used only on trusted devices. Clear the key from the header when finished. Without a key, the dashboard falls back to seeded demo data. With a live key, it reads `/api/auth/me` and enables only the actions allowed by that key role: admin keys manage governance and submit analyses, CI keys submit analyses, and read-only keys inspect existing data and export audit evidence. Full OAuth or GitHub App browser auth is future work. The dashboard includes diff submission, governance metrics, analysis list, selected analysis detail, risk badges, findings table, report preview, user management with GitHub login mapping, repository onboarding with reviewer routing assignment, organization and repository policy assignment, role-scoped API key management, audit history with JSON/CSV export, and loading/error/empty states.
 
 ## Sample Config
 

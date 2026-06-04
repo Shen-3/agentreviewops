@@ -41,6 +41,12 @@ def test_alembic_upgrade_creates_analysis_tables(tmp_path: Path, monkeypatch) ->
     api_key_indexes = {index["name"] for index in inspector.get_indexes("api_keys")}
     assert "ix_api_keys_org_role" in api_key_indexes
 
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    assert "github_login" in user_columns
+
+    user_indexes = {index["name"] for index in inspector.get_indexes("users")}
+    assert "uq_users_org_github_login" in user_indexes
+
     audit_columns = {column["name"] for column in inspector.get_columns("audit_events")}
     assert {
         "organization_id",

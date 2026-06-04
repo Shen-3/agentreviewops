@@ -75,6 +75,8 @@ def filter_github_reviewer_request_plan(
 
 def _resolve_suggested_reviewer(suggested_reviewer: SuggestedReviewer) -> tuple[str, str]:
     identifier = suggested_reviewer.identifier.strip()
+    if suggested_reviewer.source == "repository_membership" and _is_email(identifier):
+        return "skip", "missing_github_login"
     if _is_email(identifier):
         return "skip", "email_identifier_not_requestable"
 

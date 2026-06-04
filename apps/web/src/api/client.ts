@@ -10,6 +10,10 @@ import type {
   ApiUserPayload,
   AuditExportFormat,
   DiffSubmitFormState,
+  MetricsOverview,
+  MetricsRepositories,
+  MetricsRouting,
+  MetricsRules,
   PolicyConfigPayload,
 } from "./types";
 
@@ -31,7 +35,13 @@ type CreateRepositoryPayload = {
 type CreateUserPayload = {
   email: string;
   name?: string;
+  github_login?: string;
   role: "admin" | "reviewer";
+};
+
+type UpdateUserPayload = {
+  github_login?: string | null;
+  role?: "admin" | "reviewer";
 };
 
 type CreatePolicyPayload = {
@@ -123,9 +133,13 @@ export class ApiClient {
   }
 
   updateUserRole(userId: string, role: "admin" | "reviewer") {
+    return this.updateUser(userId, { role });
+  }
+
+  updateUser(userId: string, payload: UpdateUserPayload) {
     return this.request<ApiUserPayload>(`/api/users/${userId}`, {
       method: "PATCH",
-      body: JSON.stringify({ role }),
+      body: JSON.stringify(payload),
     });
   }
 
@@ -174,6 +188,22 @@ export class ApiClient {
 
   listPolicies() {
     return this.request<ApiPolicyPayload[]>("/api/policies");
+  }
+
+  getMetricsOverview(days = 30) {
+    return this.request<MetricsOverview>(buildMetricsPath("/api/metrics/overview", days));
+  }
+
+  getMetricsRules(days = 30) {
+    return this.request<MetricsRules>(buildMetricsPath("/api/metrics/rules", days));
+  }
+
+  getMetricsRouting(days = 30) {
+    return this.request<MetricsRouting>(buildMetricsPath("/api/metrics/routing", days));
+  }
+
+  getMetricsRepositories(days = 30) {
+    return this.request<MetricsRepositories>(buildMetricsPath("/api/metrics/repositories", days));
   }
 
   createPolicy(payload: CreatePolicyPayload) {
@@ -244,7 +274,8 @@ export class ApiClient {
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new ApiClientError(`API returned ${response.status}`, response.status);
+        const detail = await readApiErrorDetail(response);
+        throw new ApiClientError(`API returned ${response.status}: ${detail}`, response.status);
       }
       return response;
     } catch (error) {
@@ -271,6 +302,40 @@ function buildAuditExportPath(actionFilter: string, format: AuditExportFormat) {
     params.set("action", actionFilter);
   }
   return `/api/audit-events/export?${params.toString()}`;
+}
+
+function buildMetricsPath(path: string, days: number) {
+  const params = new URLSearchParams({ days: String(days) });
+  return `${path}?${params.toString()}`;
+}
+
+async function readApiErrorDetail(response: Response) {
+  try {
+    const payload = (await response.clone().json()) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return payload.detail;
+    }
+    if (Array.isArray(payload.detail)) {
+      return payload.detail
+        .map((item) => {
+          if (typeof item === "string") {
+            return item;
+          }
+          if (item && typeof item === "object" && "msg" in item) {
+            return String((item as { msg: unknown }).msg);
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .join("; ");
+    }
+  } catch {
+    const text = await response.text();
+    if (text.trim()) {
+      return text.trim();
+    }
+  }
+  return response.statusText || "request failed";
 }
 
 function fileSafeSegment(value: string) {

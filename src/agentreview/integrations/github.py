@@ -180,7 +180,7 @@ def request_pull_request_reviewers(
     }
 
 
-def create_or_update_check_run(
+def create_check_run(
     *,
     repo: str,
     head_sha: str,
@@ -239,6 +239,10 @@ def create_or_update_check_run(
     if not isinstance(payload, dict):
         raise GitHubIntegrationError("GitHub check run response was not an object")
     return payload
+
+
+def create_or_update_check_run(**kwargs: Any) -> dict:
+    return create_check_run(**kwargs)
 
 
 def _find_existing_comment(

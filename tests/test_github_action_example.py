@@ -55,6 +55,7 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert action["inputs"]["sarif-output"]["default"] == ""
     assert action["inputs"]["request-reviewers"]["default"] == "false"
     assert action["inputs"]["reviewer-request-mode"]["default"] == "users-and-teams"
+    assert action["inputs"]["reviewer-request-failure-mode"]["default"] == "warn"
     assert action["inputs"]["checks"]["default"] == "false"
     assert action["inputs"]["check-name"]["default"] == "AgentReviewOps"
     assert action["inputs"]["check-title"]["default"] == "AgentReviewOps policy gate"
@@ -75,6 +76,7 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert "--check-name" in steps
     assert "agentreview request-reviewers" in steps
     assert "--reviewer-request-mode" in steps
+    assert "--reviewer-request-failure-mode" in steps
     assert "--fail-on" in steps
     assert "--codeowners-file" in steps
     assert "agentreview submit-diff" in steps

@@ -36,9 +36,16 @@ def create_user(
     organization_id: str,
     email: str,
     name: str | None = None,
+    github_login: str | None = None,
     role: str = "admin",
 ) -> UserRecord:
-    record = UserRecord(organization_id=organization_id, email=email, name=name, role=role)
+    record = UserRecord(
+        organization_id=organization_id,
+        email=email,
+        name=name,
+        github_login=github_login,
+        role=role,
+    )
     session.add(record)
     session.commit()
     session.refresh(record)
@@ -60,6 +67,22 @@ def get_user(session: Session, *, organization_id: str, user_id: str) -> UserRec
 
 def get_user_by_email(session: Session, *, email: str) -> UserRecord | None:
     statement = select(UserRecord).where(UserRecord.email == email)
+    return session.scalar(statement)
+
+
+def get_user_by_github_login(
+    session: Session,
+    *,
+    organization_id: str,
+    github_login: str,
+    exclude_user_id: str | None = None,
+) -> UserRecord | None:
+    statement = select(UserRecord).where(
+        UserRecord.organization_id == organization_id,
+        func.lower(UserRecord.github_login) == github_login.lower(),
+    )
+    if exclude_user_id is not None:
+        statement = statement.where(UserRecord.id != exclude_user_id)
     return session.scalar(statement)
 
 
@@ -85,10 +108,14 @@ def update_user(
     record: UserRecord,
     *,
     name: str | None = None,
+    github_login: str | None = None,
+    github_login_provided: bool = False,
     role: str | None = None,
 ) -> UserRecord:
     if name is not None:
         record.name = name
+    if github_login_provided:
+        record.github_login = github_login
     if role is not None:
         record.role = role
     session.add(record)

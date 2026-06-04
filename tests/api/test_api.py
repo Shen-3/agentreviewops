@@ -9,10 +9,19 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from agentreview.models import (
+    AgentReviewConfig,
+    DiffFile,
+    ReviewRequirement,
+    RiskAnalysis,
+    RiskFinding,
+    SuggestedReviewer,
+)
 from agentreview_api.auth import key_prefix
 from agentreview_api.db import AnalysisRunRecord, AuditEventRecord, create_session_factory
 from agentreview_api.main import app, get_session
 from agentreview_api.repository import (
+    create_analysis_run,
     create_api_key,
     create_audit_event,
     create_organization,
@@ -95,6 +104,15 @@ def test_analysis_endpoints_reject_anonymous_requests(client: TestClient) -> Non
     assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
 
 
+def test_metrics_endpoints_reject_anonymous_requests(client: TestClient) -> None:
+    client.headers.clear()
+
+    response = client.get("/api/metrics/overview")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Valid AgentReviewOps API key required"}
+
+
 def test_audit_events_reject_anonymous_requests(client: TestClient) -> None:
     client.headers.clear()
 
@@ -135,6 +153,7 @@ def test_repository_onboarding_lists_creates_audits_and_blocks_duplicates(client
             "user_id": repositories[0]["reviewers"][0]["user_id"],
             "email": "reviewer@example.com",
             "name": "Reviewer",
+            "github_login": None,
             "role": "maintainer",
         }
     ]
@@ -237,6 +256,7 @@ def test_user_management_and_repository_membership_assignment(client: TestClient
     users = list_response.json()
     assert len(users) == 1
     assert users[0]["email"] == "reviewer@example.com"
+    assert users[0]["github_login"] is None
     assert users[0]["role"] == "admin"
 
     create_user_response = client.post(
@@ -244,6 +264,7 @@ def test_user_management_and_repository_membership_assignment(client: TestClient
         json={
             "email": "Payments.Owner@Example.COM",
             "name": "Payments Owner",
+            "github_login": " @payments-owner ",
             "role": "reviewer",
         },
     )
@@ -253,6 +274,7 @@ def test_user_management_and_repository_membership_assignment(client: TestClient
     assert created_user["user_id"]
     assert created_user["email"] == "payments.owner@example.com"
     assert created_user["name"] == "Payments Owner"
+    assert created_user["github_login"] == "payments-owner"
     assert created_user["role"] == "reviewer"
 
     duplicate_user_response = client.post(
@@ -278,6 +300,8 @@ def test_user_management_and_repository_membership_assignment(client: TestClient
     reviewer_emails = {reviewer["email"]: reviewer["role"] for reviewer in updated_repository["reviewers"]}
     assert reviewer_emails["reviewer@example.com"] == "maintainer"
     assert reviewer_emails["payments.owner@example.com"] == "owner"
+    reviewer_logins = {reviewer["email"]: reviewer["github_login"] for reviewer in updated_repository["reviewers"]}
+    assert reviewer_logins["payments.owner@example.com"] == "payments-owner"
 
     duplicate_membership_response = client.post(
         f"/api/repositories/{repository['repository_id']}/memberships",
@@ -318,6 +342,62 @@ def test_user_management_and_repository_membership_assignment(client: TestClient
     assert membership_event["metadata"]["user_id"] == created_user["user_id"]
     assert membership_event["metadata"]["membership_role"] == "owner"
     assert "payments.owner@example.com" not in json.dumps(membership_event)
+
+
+def test_user_github_login_validation_update_clear_and_duplicate_detection(client: TestClient) -> None:
+    first_response = client.post(
+        "/api/users",
+        json={
+            "email": "alice@example.com",
+            "github_login": "@Alice-Reviewer",
+            "role": "reviewer",
+        },
+    )
+    assert first_response.status_code == 200
+    first_user = first_response.json()
+    assert first_user["github_login"] == "Alice-Reviewer"
+
+    update_response = client.patch(
+        f"/api/users/{first_user['user_id']}",
+        json={"github_login": "alice-reviewer-2"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["github_login"] == "alice-reviewer-2"
+
+    clear_response = client.patch(
+        f"/api/users/{first_user['user_id']}",
+        json={"github_login": ""},
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["github_login"] is None
+
+    invalid_response = client.post(
+        "/api/users",
+        json={
+            "email": "invalid-login@example.com",
+            "github_login": "-invalid",
+            "role": "reviewer",
+        },
+    )
+    assert invalid_response.status_code == 400
+    assert "Invalid GitHub login" in invalid_response.json()["detail"]
+
+    reset_response = client.patch(
+        f"/api/users/{first_user['user_id']}",
+        json={"github_login": "Alice"},
+    )
+    assert reset_response.status_code == 200
+
+    duplicate_response = client.post(
+        "/api/users",
+        json={
+            "email": "duplicate-login@example.com",
+            "github_login": "alice",
+            "role": "reviewer",
+        },
+    )
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json() == {"detail": "GitHub login already belongs to another user"}
 
 
 def test_api_key_management_lists_creates_and_revokes_keys(client: TestClient) -> None:
@@ -744,6 +824,36 @@ def test_repository_scoped_policy_overrides_org_policy_and_records_routing(clien
     assert unknown_repo_response.json()["risk_score"] == 0
 
 
+def test_repository_membership_with_github_login_routes_requestable_reviewer(client: TestClient) -> None:
+    user = client.get("/api/users").json()[0]
+    update_response = client.patch(
+        f"/api/users/{user['user_id']}",
+        json={"github_login": "@checkout-reviewer"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["github_login"] == "checkout-reviewer"
+
+    diff_text = (PROJECT_ROOT / "examples" / "sample.diff").read_text(encoding="utf-8")
+    analysis_response = client.post(
+        "/api/analyze/diff",
+        json={
+            "diff": diff_text,
+            "repository": "platform/checkout-api",
+        },
+    )
+
+    assert analysis_response.status_code == 200
+    analysis_body = analysis_response.json()
+    assert analysis_body["review_requirements"][0]["suggested_reviewers"] == [
+        {
+            "source": "repository_membership",
+            "identifier": "@checkout-reviewer",
+            "role": "maintainer",
+        }
+    ]
+    assert "Repository membership: @checkout-reviewer" in analysis_body["markdown"]
+
+
 def test_repository_policy_requires_repository_from_same_org(client: TestClient) -> None:
     missing_repository_response = client.post(
         "/api/policies",
@@ -934,6 +1044,137 @@ def test_list_analysis_runs_returns_dashboard_summaries(client: TestClient) -> N
 
     assert detail_response.status_code == 200
     assert detail_response.json()["analysis_run_id"] == analysis_run_id
+
+
+def test_metrics_overview_rules_and_routing_are_aggregated_from_persisted_runs(client: TestClient) -> None:
+    with app.state.test_session_factory() as session:
+        organization_id = client.get("/api/auth/me").json()["organization_id"]
+        _create_metric_analysis_run(
+            session,
+            organization_id=organization_id,
+            repository="platform/checkout-api",
+            risk_level="high",
+            risk_score=70,
+            agent_name="Codex",
+            findings=[
+                _finding("critical-path-change", severity="high", score_delta=30),
+                _finding("missing-tests", severity="medium", score_delta=15),
+            ],
+            review_requirements=[
+                _requirement(
+                    "security-review",
+                    required_roles=["maintainer"],
+                    reviewers=[
+                        SuggestedReviewer(source="repository_membership", identifier="@alice", role="maintainer")
+                    ],
+                )
+            ],
+        )
+        _create_metric_analysis_run(
+            session,
+            organization_id=organization_id,
+            repository="platform/billing-api",
+            risk_level="low",
+            risk_score=5,
+            agent_name="Cursor",
+            findings=[_finding("missing-docs", severity="info", score_delta=0)],
+            review_requirements=[_requirement("owner-review", required_roles=["owner"], reviewers=[])],
+        )
+
+    overview_response = client.get("/api/metrics/overview")
+    assert overview_response.status_code == 200
+    overview = overview_response.json()
+    assert overview["analysis_count"] == 2
+    assert overview["risk_distribution"] == {"low": 1, "medium": 0, "high": 1, "block": 0}
+    assert overview["high_or_block_count"] == 1
+    assert overview["average_risk_score"] == 37.5
+    assert overview["unique_repository_count"] == 2
+    assert overview["unique_agent_count"] == 2
+    assert overview["analysis_count_by_agent"] == {"Codex": 1, "Cursor": 1}
+    assert len(overview["recent_trend"]) == 30
+
+    rules_response = client.get("/api/metrics/rules")
+    assert rules_response.status_code == 200
+    rules = rules_response.json()
+    assert rules["total_finding_count"] == 3
+    assert rules["severity_distribution"]["high"] == 1
+    assert rules["severity_distribution"]["medium"] == 1
+    assert rules["high_impact_rule_count"] == 1
+    assert rules["top_rules"][0] == {
+        "rule_id": "critical-path-change",
+        "finding_count": 1,
+        "average_score_delta": 30.0,
+        "high_impact_count": 1,
+    }
+
+    routing_response = client.get("/api/metrics/routing")
+    assert routing_response.status_code == 200
+    routing = routing_response.json()
+    assert routing["total_review_requirement_count"] == 2
+    assert routing["configured_review_requirement_count"] == 1
+    assert routing["unconfigured_review_requirement_count"] == 1
+    assert routing["routing_hit_rate"] == 0.5
+    assert routing["reviewer_source_distribution"] == {"repository_membership": 1}
+    assert routing["required_role_distribution"] == {"maintainer": 1, "owner": 1}
+    assert routing["top_unconfigured_requirements"] == [
+        {"requirement_id": "owner-review", "title": "Owner review", "count": 1}
+    ]
+
+
+def test_repository_metrics_are_organization_scoped_and_days_filtered(client: TestClient) -> None:
+    now = datetime.now(timezone.utc)
+    with app.state.test_session_factory() as session:
+        organization_id = client.get("/api/auth/me").json()["organization_id"]
+        _create_metric_analysis_run(
+            session,
+            organization_id=organization_id,
+            repository="platform/checkout-api",
+            risk_level="block",
+            risk_score=90,
+            agent_name="Codex",
+            findings=[_finding("critical-path-change", severity="critical", score_delta=40)],
+            review_requirements=[_requirement("security-review", required_roles=["owner"], reviewers=[])],
+            created_at=now - timedelta(days=2),
+        )
+        _create_metric_analysis_run(
+            session,
+            organization_id=organization_id,
+            repository="platform/old-api",
+            risk_level="high",
+            risk_score=60,
+            agent_name="Codex",
+            findings=[_finding("dependency-change", severity="medium", score_delta=20)],
+            review_requirements=[],
+            created_at=now - timedelta(days=45),
+        )
+        other_org = create_organization(session, slug="metrics-other", name="Metrics Other")
+        _create_metric_analysis_run(
+            session,
+            organization_id=other_org.id,
+            repository="platform/other-api",
+            risk_level="block",
+            risk_score=100,
+            agent_name="Codex",
+            findings=[_finding("other-rule", severity="critical", score_delta=80)],
+            review_requirements=[],
+            created_at=now - timedelta(days=1),
+        )
+
+    repositories_response = client.get("/api/metrics/repositories", params={"days": 7})
+    assert repositories_response.status_code == 200
+    repositories = repositories_response.json()["repositories"]
+    assert [row["repository"] for row in repositories] == ["platform/checkout-api"]
+    assert repositories[0]["analysis_count"] == 1
+    assert repositories[0]["top_risk_level"] == "block"
+    assert repositories[0]["unconfigured_review_requirement_count"] == 1
+    assert repositories[0]["top_triggered_rule_ids"] == ["critical-path-change"]
+
+    overview_response = client.get("/api/metrics/overview", params={"days": 7, "repository": "platform/old-api"})
+    assert overview_response.status_code == 200
+    assert overview_response.json()["analysis_count"] == 0
+
+    invalid_response = client.get("/api/metrics/overview", params={"days": 0})
+    assert invalid_response.status_code == 422
 
 
 def test_audit_events_are_scoped_to_authenticated_organization(client: TestClient) -> None:
@@ -1130,3 +1371,60 @@ def test_analyze_diff_validates_empty_diff(client: TestClient) -> None:
     response = client.post("/api/analyze/diff", json={"diff": ""})
 
     assert response.status_code == 422
+
+
+def _create_metric_analysis_run(
+    session,
+    *,
+    organization_id: str,
+    repository: str,
+    risk_level: str,
+    risk_score: int,
+    agent_name: str,
+    findings: list[RiskFinding],
+    review_requirements: list[ReviewRequirement],
+    created_at: datetime | None = None,
+) -> AnalysisRunRecord:
+    record = create_analysis_run(
+        session,
+        organization_id=organization_id,
+        repository=repository,
+        agent_name=agent_name,
+        changed_files=[DiffFile(path="app.py", status="modified", additions=3, deletions=1)],
+        analysis=RiskAnalysis(risk_score=risk_score, risk_level=risk_level, findings=findings),
+        review_requirements=review_requirements,
+        markdown="# Metric test\n",
+        config=AgentReviewConfig(),
+    )
+    if created_at is not None:
+        record.created_at = created_at
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+    return record
+
+
+def _finding(rule_id: str, *, severity: str, score_delta: int) -> RiskFinding:
+    return RiskFinding(
+        rule_id=rule_id,
+        severity=severity,
+        title=rule_id.replace("-", " ").title(),
+        description=f"{rule_id} triggered.",
+        score_delta=score_delta,
+        file_path="app.py",
+    )
+
+
+def _requirement(
+    requirement_id: str,
+    *,
+    required_roles: list[str],
+    reviewers: list[SuggestedReviewer],
+) -> ReviewRequirement:
+    return ReviewRequirement(
+        requirement_id=requirement_id,
+        title=requirement_id.replace("-", " ").capitalize(),
+        reason="Metric test requirement.",
+        required_roles=required_roles,
+        suggested_reviewers=reviewers,
+    )

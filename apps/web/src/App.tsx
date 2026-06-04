@@ -37,6 +37,10 @@ import type {
   RepositoryFormState,
   UserFormState,
   MembershipFormState,
+  MetricsOverview,
+  MetricsRepositories,
+  MetricsRouting,
+  MetricsRules,
   ApiSummary,
   ApiDetail,
   ApiAuditEvent,
@@ -49,6 +53,20 @@ import type {
 import { EmptyState } from "./components/EmptyState";
 import { Layout } from "./components/Layout";
 import { RiskBadge } from "./components/RiskBadge";
+import { defaultPolicyConfig, ruleLabels } from "./config/defaultPolicy";
+import { emptyDiffSubmitForm, emptyMembershipForm, emptyRepositoryForm, emptyUserForm } from "./forms/defaults";
+import {
+  seededAnalyses,
+  seededApiKeys,
+  seededAuditEvents,
+  seededMetricsOverview,
+  seededMetricsRepositories,
+  seededMetricsRouting,
+  seededMetricsRules,
+  seededPolicies,
+  seededRepositories,
+  seededUsers,
+} from "./fixtures/demoData";
 import { useApiClient } from "./hooks/useApiClient";
 import {
   API_KEY_STORAGE_MODE_KEY,
@@ -62,330 +80,12 @@ import { AnalysisRunsPage } from "./pages/AnalysisRunsPage";
 import { ApiKeysPage } from "./pages/ApiKeysPage";
 import { AuditPage } from "./pages/AuditPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { GovernanceMetricsPage } from "./pages/GovernanceMetricsPage";
 import { PoliciesPage } from "./pages/PoliciesPage";
 import { RepositoriesPage } from "./pages/RepositoriesPage";
 import { UsersPage } from "./pages/UsersPage";
 
 const API_BASE_URL = DEFAULT_API_BASE_URL;
-const ruleLabels: Record<RuleId, string> = {
-  require_tests_for_code_changes: "Require tests for code changes",
-  flag_dependency_changes: "Flag dependency changes",
-  flag_ci_changes: "Flag CI changes",
-  flag_auth_changes: "Flag auth changes",
-  flag_large_generated_files: "Flag generated files",
-};
-const defaultPolicyConfig: PolicyConfigPayload = {
-  version: 1,
-  risk: {
-    fail_level: "high",
-    large_diff: {
-      max_files: 20,
-      max_lines: 800,
-    },
-  },
-  critical_paths: [
-    "auth/**",
-    "security/**",
-    "payments/**",
-    "infra/**",
-    ".github/workflows/**",
-    "Dockerfile",
-    "docker-compose.yml",
-    "package.json",
-    "pyproject.toml",
-    "requirements*.txt",
-  ],
-  test_patterns: ["tests/**", "**/*test*", "**/*spec*"],
-  rules: {
-    require_tests_for_code_changes: true,
-    flag_dependency_changes: true,
-    flag_ci_changes: true,
-    flag_auth_changes: true,
-    flag_large_generated_files: true,
-  },
-};
-
-const seededAnalyses: Analysis[] = [
-  {
-    id: "run_8fb2",
-    repo: "platform/checkout-api",
-    prLabel: "#1842",
-    title: "Tighten inactive-user session handling",
-    author: "codex-agent",
-    agent: "Codex",
-    branch: "codex/auth-session-hardening",
-    createdAt: "05/23/2026, 11:34",
-    riskLevel: "high",
-    riskScore: 55,
-    changedFileCount: 1,
-    findingCount: 3,
-    changedFiles: [{ path: "auth/session.py", status: "modified", additions: 3, deletions: 1, critical: true, test: false }],
-    findings: [
-      { severity: "high", rule: "critical-path-change", file: "auth/session.py", reason: "Configured critical path changed." },
-      { severity: "high", rule: "sensitive-area-change", file: "auth/session.py", reason: "Auth behavior changed and needs owner review." },
-      { severity: "medium", rule: "missing-tests", file: "Change set", reason: "Production code changed without tests." },
-    ],
-    reviewRequirements: [
-      {
-        requirementId: "security-review",
-        title: "Security review",
-        reason: "Sensitive or dangerous code path changed.",
-        matchedFiles: ["auth/session.py"],
-        matchedRuleIds: ["critical-path-change", "sensitive-area-change"],
-        requiredRoles: ["maintainer", "owner"],
-        suggestedReviewers: [{ source: "repository_membership", identifier: "reviewer@example.com", role: "maintainer" }],
-      },
-    ],
-    report: `# AgentReviewOps Report
-
-Risk: HIGH (55/100)
-
-## Summary
-
-1 file changed with 4 positive risk findings. Review auth/session.py before merge.
-
-## Human Review Checklist
-
-- [ ] Verify critical-path changes are intentional and scoped.
-- [ ] Review auth behavior with a human owner.
-- [ ] Require tests for changed behavior or document why tests are not needed.`,
-  },
-  {
-    id: "run_79ac",
-    repo: "growth/web-console",
-    prLabel: "#921",
-    title: "Update pricing copy and docs",
-    author: "cursor-agent",
-    agent: "Cursor",
-    branch: "cursor/pricing-copy",
-    createdAt: "05/23/2026, 10:18",
-    riskLevel: "low",
-    riskScore: 0,
-    changedFileCount: 1,
-    findingCount: 1,
-    changedFiles: [{ path: "docs/pricing.md", status: "modified", additions: 12, deletions: 4, critical: false, test: false }],
-    findings: [{ severity: "info", rule: "docs-updated", file: "docs/pricing.md", reason: "Documentation changed with no source risk findings." }],
-    reviewRequirements: [],
-    report: `# AgentReviewOps Report
-
-Risk: LOW (0/100)
-
-## Summary
-
-Documentation-only change. Confirm copy matches the product offer.`,
-  },
-  {
-    id: "run_42dd",
-    repo: "infra/deployments",
-    prLabel: "#311",
-    title: "Rotate worker image and CI release path",
-    author: "devin",
-    agent: "Devin",
-    branch: "devin/release-worker-update",
-    createdAt: "05/22/2026, 17:46",
-    riskLevel: "block",
-    riskScore: 78,
-    changedFileCount: 2,
-    findingCount: 3,
-    changedFiles: [
-      { path: ".github/workflows/release.yml", status: "modified", additions: 18, deletions: 6, critical: true, test: false },
-      { path: "deploy/docker-compose.yml", status: "modified", additions: 9, deletions: 2, critical: true, test: false },
-    ],
-    findings: [
-      { severity: "high", rule: "critical-path-change", file: ".github/workflows/release.yml", reason: "Release automation changed." },
-      { severity: "medium", rule: "ci-change", file: ".github/workflows/release.yml", reason: "CI/CD workflow changed." },
-      { severity: "medium", rule: "missing-tests", file: "Change set", reason: "Infrastructure change has no validation fixture." },
-    ],
-    reviewRequirements: [
-      {
-        requirementId: "ci-review",
-        title: "Ci review",
-        reason: "CI/CD or supply-chain sensitive workflow changed.",
-        matchedFiles: [".github/workflows/release.yml"],
-        matchedRuleIds: ["ci-change"],
-        requiredRoles: ["maintainer"],
-        suggestedReviewers: [],
-      },
-    ],
-    report: `# AgentReviewOps Report
-
-Risk: BLOCK (78/100)
-
-## Summary
-
-Release infrastructure changed. Require platform owner review before merge.
-
-## Human Review Checklist
-
-- [ ] Confirm CI/CD changes do not weaken release controls.
-- [ ] Verify deployment image and rollback path.`,
-  },
-];
-
-const seededAuditEvents: AuditEvent[] = [
-  {
-    id: "audit_analysis_8fb2",
-    createdAt: "05/23/2026, 11:35",
-    action: "analysis.created",
-    actor: "api key local-ci",
-    target: "analysis run run_8fb2",
-    summary: "platform/checkout-api #1842 analyzed at high risk.",
-    metadata: {
-      repository: "platform/checkout-api",
-      pull_request_number: 1842,
-      agent_name: "Codex",
-      risk_level: "high",
-      risk_score: 55,
-      changed_file_count: 1,
-      finding_count: 3,
-    },
-  },
-  {
-    id: "audit_policy_default",
-    createdAt: "05/23/2026, 10:42",
-    action: "policy.created",
-    actor: "api key platform-admin",
-    target: "policy default-review-policy",
-    summary: "Default review policy saved for organization scope.",
-    metadata: {
-      policy_name: "Default review policy",
-      enabled: true,
-      scope: "organization",
-    },
-  },
-  {
-    id: "audit_key_local_ci",
-    createdAt: "05/23/2026, 10:39",
-    action: "api_key.created",
-    actor: "system",
-    target: "api key local-ci",
-    summary: "Bootstrap key created for CI and dashboard access.",
-    metadata: {
-      api_key_name: "Local CI",
-      source: "bootstrap",
-    },
-  },
-  {
-    id: "audit_org_bootstrap",
-    createdAt: "05/23/2026, 10:38",
-    action: "organization.bootstrapped",
-    actor: "system",
-    target: "organization acme",
-    summary: "Self-hosted organization bootstrapped.",
-    metadata: {
-      source: "bootstrap",
-    },
-  },
-];
-
-const seededApiKeys: ApiKeyRecord[] = [
-  {
-    id: "key_local_ci",
-    name: "Local CI",
-    role: "admin",
-    keyPrefix: "arok_demo_ci",
-    createdAt: "05/23/2026, 10:39",
-    revokedAt: null,
-    isCurrent: true,
-  },
-  {
-    id: "key_dashboard_operator",
-    name: "Dashboard operator",
-    role: "admin",
-    keyPrefix: "arok_demo_ui",
-    createdAt: "05/23/2026, 10:42",
-    revokedAt: null,
-    isCurrent: false,
-  },
-  {
-    id: "key_retired",
-    name: "Retired bootstrap key",
-    role: "read_only",
-    keyPrefix: "arok_demo_old",
-    createdAt: "05/22/2026, 18:12",
-    revokedAt: "05/23/2026, 09:05",
-    isCurrent: false,
-  },
-];
-
-const seededUsers: UserRecord[] = [
-  {
-    id: "user_reviewer",
-    email: "reviewer@example.com",
-    name: "Reviewer",
-    role: "admin",
-    createdAt: "05/23/2026, 10:38",
-  },
-];
-
-const seededRepositories: RepositoryRecord[] = [
-  {
-    id: "repo_checkout_api",
-    provider: "github",
-    owner: "platform",
-    name: "checkout-api",
-    fullName: "platform/checkout-api",
-    defaultBranch: "main",
-    visibility: "private",
-    reviewers: [{ userId: "user_reviewer", email: "reviewer@example.com", name: "Reviewer", role: "maintainer" }],
-    createdAt: "05/23/2026, 10:38",
-  },
-  {
-    id: "repo_web_console",
-    provider: "github",
-    owner: "growth",
-    name: "web-console",
-    fullName: "growth/web-console",
-    defaultBranch: "main",
-    visibility: "private",
-    reviewers: [],
-    createdAt: "05/23/2026, 10:41",
-  },
-];
-
-const seededPolicies: PolicyRecord[] = [
-  {
-    id: "policy_default",
-    name: "Default review policy",
-    scope: "organization",
-    repositoryId: null,
-    repositoryFullName: null,
-    enabled: true,
-    config: defaultPolicyConfig,
-    createdAt: "05/23/2026, 10:42",
-    updatedAt: "05/23/2026, 10:42",
-  },
-];
-
-const emptyDiffSubmitForm: DiffSubmitFormState = {
-  diff: "",
-  repository: "",
-  pullRequestNumber: "",
-  title: "",
-  author: "",
-  agentName: "",
-  branch: "",
-};
-
-const emptyRepositoryForm: RepositoryFormState = {
-  provider: "github",
-  owner: "",
-  name: "",
-  defaultBranch: "main",
-  visibility: "private",
-};
-
-const emptyUserForm: UserFormState = {
-  email: "",
-  name: "",
-  role: "reviewer",
-};
-
-const emptyMembershipForm: MembershipFormState = {
-  repositoryId: "",
-  userId: "",
-  role: "reviewer",
-};
 
 export default function App() {
   const initialStoredApiKey = React.useMemo(readStoredApiKey, []);
@@ -395,6 +95,10 @@ export default function App() {
   const [users, setUsers] = React.useState<UserRecord[]>([]);
   const [repositories, setRepositories] = React.useState<RepositoryRecord[]>([]);
   const [policies, setPolicies] = React.useState<PolicyRecord[]>([]);
+  const [metricsOverview, setMetricsOverview] = React.useState<MetricsOverview>(seededMetricsOverview);
+  const [metricsRules, setMetricsRules] = React.useState<MetricsRules>(seededMetricsRules);
+  const [metricsRouting, setMetricsRouting] = React.useState<MetricsRouting>(seededMetricsRouting);
+  const [metricsRepositories, setMetricsRepositories] = React.useState<MetricsRepositories>(seededMetricsRepositories);
   const [policyForm, setPolicyForm] = React.useState<PolicyFormState>(() => policyToForm(seededPolicies[0]));
   const [policyStatus, setPolicyStatus] = React.useState("");
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -406,7 +110,7 @@ export default function App() {
   const [query, setQuery] = React.useState("");
   const [apiKeyStorageMode, setApiKeyStorageMode] = useLocalStorage<ApiKeyStorageMode>(
     API_KEY_STORAGE_MODE_KEY,
-    initialStoredApiKey.mode,
+    "session",
   );
   const [apiKey, setApiKey] = React.useState(() => initialStoredApiKey.apiKey);
   const [apiKeyInput, setApiKeyInput] = React.useState("");
@@ -434,6 +138,10 @@ export default function App() {
       setUsers(seededUsers);
       setRepositories(seededRepositories);
       setPolicies(seededPolicies);
+      setMetricsOverview(seededMetricsOverview);
+      setMetricsRules(seededMetricsRules);
+      setMetricsRouting(seededMetricsRouting);
+      setMetricsRepositories(seededMetricsRepositories);
       setPolicyForm(policyToForm(seededPolicies[0]));
       setCreatedApiKey(null);
       setSelectedId(seededAnalyses[0].id);
@@ -442,16 +150,31 @@ export default function App() {
       return;
     }
     try {
-      const [authPayload, summaries, auditPayload, apiKeyPayload, userPayload, repositoryPayload, policyPayload] =
-        await Promise.all([
-          apiClient.getMe(),
-          apiClient.listAnalysisRuns(),
-          apiClient.listAuditEvents(50),
-          apiClient.listApiKeys(),
-          apiClient.listUsers(),
-          apiClient.listRepositories(),
-          apiClient.listPolicies(),
-        ]);
+      const [
+        authPayload,
+        summaries,
+        auditPayload,
+        apiKeyPayload,
+        userPayload,
+        repositoryPayload,
+        policyPayload,
+        metricsOverviewPayload,
+        metricsRulesPayload,
+        metricsRoutingPayload,
+        metricsRepositoriesPayload,
+      ] = await Promise.all([
+        apiClient.getMe(),
+        apiClient.listAnalysisRuns(),
+        apiClient.listAuditEvents(50),
+        apiClient.listApiKeys(),
+        apiClient.listUsers(),
+        apiClient.listRepositories(),
+        apiClient.listPolicies(),
+        apiClient.getMetricsOverview(),
+        apiClient.getMetricsRules(),
+        apiClient.getMetricsRouting(),
+        apiClient.getMetricsRepositories(),
+      ]);
       const normalized = summaries.map(normalizeSummary);
       const normalizedAudit = auditPayload.map(normalizeAuditEvent);
       const normalizedApiKeys = apiKeyPayload.map(normalizeApiKey);
@@ -465,6 +188,10 @@ export default function App() {
       setUsers(normalizedUsers);
       setRepositories(normalizedRepositories);
       setPolicies(normalizedPolicies);
+      setMetricsOverview(metricsOverviewPayload);
+      setMetricsRules(metricsRulesPayload);
+      setMetricsRouting(metricsRoutingPayload);
+      setMetricsRepositories(metricsRepositoriesPayload);
       setPolicyForm(policyToForm(normalizedPolicies[0] ?? seededPolicies[0]));
       setDataSource("api");
       setMode(normalized.length || normalizedAudit.length || normalizedApiKeys.length || normalizedUsers.length || normalizedRepositories.length || normalizedPolicies.length ? "ready" : "empty");
@@ -484,6 +211,10 @@ export default function App() {
       setUsers([]);
       setRepositories([]);
       setPolicies([]);
+      setMetricsOverview(seededMetricsOverview);
+      setMetricsRules(seededMetricsRules);
+      setMetricsRouting(seededMetricsRouting);
+      setMetricsRepositories(seededMetricsRepositories);
       setCreatedApiKey(null);
       setSelectedId(null);
       setDataSource("api");
@@ -547,6 +278,10 @@ export default function App() {
     setUsers(seededUsers);
     setRepositories(seededRepositories);
     setPolicies(seededPolicies);
+    setMetricsOverview(seededMetricsOverview);
+    setMetricsRules(seededMetricsRules);
+    setMetricsRouting(seededMetricsRouting);
+    setMetricsRepositories(seededMetricsRepositories);
     setPolicyForm(policyToForm(seededPolicies[0]));
     setPolicyStatus("");
     setUserStatus("");
@@ -669,6 +404,7 @@ export default function App() {
         await apiClient.createUser({
           email: userForm.email.trim(),
           name: userForm.name.trim() || undefined,
+          github_login: userForm.githubLogin.trim() || undefined,
           role: userForm.role,
         }),
       );
@@ -831,6 +567,31 @@ export default function App() {
       if (!(error instanceof Error) || !error.message.includes("400")) {
         setMode("error");
       }
+    }
+  };
+  const updateDashboardUserGithubLogin = async (userId: string, githubLogin: string) => {
+    if (!access.canManageGovernance) {
+      setUserStatus(access.governanceHint ?? "Admin API key required.");
+      return;
+    }
+    if (!apiKey || dataSource !== "api") {
+      return;
+    }
+    try {
+      const user = normalizeUser(await apiClient.updateUser(userId, { github_login: githubLogin.trim() || null }));
+      setUsers((current) => current.map((record) => (record.id === user.id ? user : record)));
+      setUserStatus(user.githubLogin ? `${user.email} mapped to @${user.githubLogin}.` : `${user.email} GitHub login cleared.`);
+      void loadWorkspaceData();
+    } catch (error) {
+      if (isAuthError(error)) {
+        clearStoredApiKey();
+        setApiKey("");
+        setAuthContext(null);
+        setMode("error");
+        return;
+      }
+      setUserStatus("GitHub login could not be updated.");
+      setMode("error");
     }
   };
   const updateDashboardApiKeyRole = async (apiKeyId: string, role: ApiKeyRole) => {
@@ -1041,6 +802,9 @@ export default function App() {
           <a className="nav-link active" href="#analyses">
             Analyses
           </a>
+          <a className="nav-link" href="#governance">
+            Governance
+          </a>
           <a className="nav-link" href="#repositories">
             Repositories
           </a>
@@ -1101,8 +865,9 @@ export default function App() {
                 ) : null}
               </div>
               <p className="api-key-warning">
-                API keys are stored in your browser for this self-hosted dashboard. Use session-only mode on shared
-                machines.
+                {apiKeyStorageMode === "local"
+                  ? "Browser storage keeps the API key after this tab closes. Use only on a trusted private device."
+                  : "Session-only mode stores the API key for this browser tab and clears it when the session ends."}
               </p>
             </form>
             <button className="primary" type="button" onClick={() => void loadWorkspaceData()}>
@@ -1138,6 +903,16 @@ export default function App() {
             onSubmit={submitDashboardDiff}
           />
         </DashboardPage>
+
+        <GovernanceMetricsPage>
+          <GovernanceMetricsPanel
+            overview={metricsOverview}
+            rules={metricsRules}
+            routing={metricsRouting}
+            repositories={metricsRepositories}
+            mode={mode}
+          />
+        </GovernanceMetricsPage>
 
         <AnalysisRunsPage>
           <section className="analysis-list" aria-labelledby="analysis-list-title">
@@ -1215,6 +990,7 @@ export default function App() {
             onFormChange={setUserForm}
             onCreate={createDashboardUser}
             onUpdateRole={(userId, role) => void updateDashboardUserRole(userId, role)}
+            onUpdateGithubLogin={(userId, githubLogin) => void updateDashboardUserGithubLogin(userId, githubLogin)}
             onDelete={(userId) => void deleteDashboardUser(userId)}
           />
         </UsersPage>
@@ -1276,6 +1052,170 @@ function Metric({ label, value }: { label: string; value: number }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function GovernanceMetricsPanel({
+  overview,
+  rules,
+  routing,
+  repositories,
+  mode,
+}: {
+  overview: MetricsOverview;
+  rules: MetricsRules;
+  routing: MetricsRouting;
+  repositories: MetricsRepositories;
+  mode: LoadMode;
+}) {
+  const maxRiskCount = Math.max(1, ...Object.values(overview.risk_distribution));
+  const maxTrendCount = Math.max(1, ...overview.recent_trend.map((point) => point.analysis_count));
+  return (
+    <section className="governance-panel" id="governance" aria-labelledby="governance-metrics-title">
+      <div className="section-head">
+        <div>
+          <p className="eyebrow">Governance</p>
+          <h2 id="governance-metrics-title">Governance metrics</h2>
+          <p>{mode === "loading" ? "Loading metrics..." : `Generated ${formatDate(overview.generated_at)}`}</p>
+        </div>
+      </div>
+
+      <section className="metrics governance-summary" aria-label="Governance summary">
+        <Metric label="Total analyses" value={overview.analysis_count} />
+        <Metric label="High or block" value={overview.high_or_block_count} />
+        <Metric label="Avg risk score" value={overview.average_risk_score} />
+        <Metric label="Unconfigured routes" value={routing.unconfigured_review_requirement_count} />
+      </section>
+
+      <div className="governance-grid">
+        <section className="governance-section">
+          <h3>Risk distribution</h3>
+          <div className="bar-list">
+            {(["block", "high", "medium", "low"] as RiskLevel[]).map((level) => (
+              <div className="bar-row" key={level}>
+                <span>{level}</span>
+                <div className="bar-track">
+                  <span style={{ width: barWidth(overview.risk_distribution[level], maxRiskCount) }} />
+                </div>
+                <strong>{overview.risk_distribution[level]}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="governance-section">
+          <h3>Recent trend</h3>
+          <div className="trend-list">
+            {overview.recent_trend.slice(-10).map((point) => (
+              <div className="trend-row" key={point.date}>
+                <span>{point.date.slice(5)}</span>
+                <div className="bar-track">
+                  <span style={{ width: barWidth(point.analysis_count, maxTrendCount) }} />
+                </div>
+                <strong>{point.analysis_count}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="governance-section">
+          <h3>Top rules</h3>
+          <div className="table-wrap compact-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rule</th>
+                  <th>Findings</th>
+                  <th>Avg score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.top_rules.length ? (
+                  rules.top_rules.map((rule) => (
+                    <tr key={rule.rule_id}>
+                      <td>{rule.rule_id}</td>
+                      <td>{rule.finding_count}</td>
+                      <td>{rule.average_score_delta}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={3}>No triggered rules.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="governance-section">
+          <h3>Routing</h3>
+          <dl className="routing-metrics">
+            <div>
+              <dt>Hit rate</dt>
+              <dd>{formatPercent(routing.routing_hit_rate)}</dd>
+            </div>
+            <div>
+              <dt>Configured</dt>
+              <dd>{routing.configured_review_requirement_count}</dd>
+            </div>
+            <div>
+              <dt>Unconfigured</dt>
+              <dd>{routing.unconfigured_review_requirement_count}</dd>
+            </div>
+            <div>
+              <dt>Total</dt>
+              <dd>{routing.total_review_requirement_count}</dd>
+            </div>
+          </dl>
+          <div className="metadata-list">
+            {routing.top_unconfigured_requirements.map((requirement) => (
+              <span className="metadata-pill" key={requirement.requirement_id}>
+                {requirement.title}: {requirement.count}
+              </span>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className="governance-section repository-risk-section">
+        <h3>Repository risk</h3>
+        <div className="table-wrap">
+          <table className="repository-risk-table">
+            <thead>
+              <tr>
+                <th>Repository</th>
+                <th>Analyses</th>
+                <th>Avg risk</th>
+                <th>Top risk</th>
+                <th>Unconfigured</th>
+                <th>Top rules</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repositories.repositories.length ? (
+                repositories.repositories.map((repository) => (
+                  <tr key={repository.repository}>
+                    <td>{repository.repository}</td>
+                    <td>{repository.analysis_count}</td>
+                    <td>{repository.average_risk_score}</td>
+                    <td>
+                      <RiskBadge level={repository.top_risk_level} label={repository.top_risk_level.toUpperCase()} />
+                    </td>
+                    <td>{repository.unconfigured_review_requirement_count}</td>
+                    <td>{repository.top_triggered_rule_ids.join(", ") || "-"}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6}>No repository metrics yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
   );
 }
 
@@ -1704,8 +1644,9 @@ function RepositoryAdmin({
             <option value="">Choose user</option>
             {users.map((user) => (
               <option value={user.id} key={user.id}>
-                {user.name || user.email}
-              </option>
+              {user.name || user.email}
+              {user.githubLogin ? ` (@${user.githubLogin})` : " (no GitHub login)"}
+            </option>
             ))}
           </select>
         </label>
@@ -1823,6 +1764,9 @@ function ReviewersCell({
       {repository.reviewers.map((reviewer) => (
         <span className="reviewer-pill" key={reviewer.userId}>
           {reviewer.name || reviewer.email}
+          <span className="reviewer-identity">
+            {reviewer.githubLogin ? `@${reviewer.githubLogin}` : "No GitHub login"}
+          </span>
           <select
             aria-label={`Role for ${reviewer.name || reviewer.email}`}
             value={reviewer.role}
@@ -1861,6 +1805,7 @@ function UserAdmin({
   onFormChange,
   onCreate,
   onUpdateRole,
+  onUpdateGithubLogin,
   onDelete,
 }: {
   users: UserRecord[];
@@ -1873,6 +1818,7 @@ function UserAdmin({
   onFormChange: React.Dispatch<React.SetStateAction<UserFormState>>;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onUpdateRole: (userId: string, role: "admin" | "reviewer") => void;
+  onUpdateGithubLogin: (userId: string, githubLogin: string) => void;
   onDelete: (userId: string) => void;
 }) {
   const liveData = dataSource === "api" && mode !== "error";
@@ -1905,6 +1851,15 @@ function UserAdmin({
             />
           </label>
           <label>
+            <span>GitHub login</span>
+            <input
+              value={form.githubLogin}
+              onChange={(event) => onFormChange((current) => ({ ...current, githubLogin: event.target.value }))}
+              disabled={!canEdit}
+              placeholder="@reviewer"
+            />
+          </label>
+          <label>
             <span>Org role</span>
             <select value={form.role} onChange={(event) => onFormChange((current) => ({ ...current, role: event.target.value as "admin" | "reviewer" }))} disabled={!canEdit}>
               <option value="admin">Admin</option>
@@ -1918,18 +1873,29 @@ function UserAdmin({
         </form>
       </div>
       {status || accessHint ? <span className="policy-status">{status || accessHint}</span> : null}
+      <p className="table-note">
+        GitHub login enables AgentReviewOps to request this user as a PR reviewer. Emails are not automatically mapped to GitHub users.
+      </p>
       <div className="table-wrap user-table-wrap">
         <table className="user-table">
           <thead>
             <tr>
               <th>User</th>
+              <th>GitHub</th>
               <th>Role</th>
               <th>Created</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
-            <UserRows users={users} mode={mode} liveData={canEdit} onUpdateRole={onUpdateRole} onDelete={onDelete} />
+            <UserRows
+              users={users}
+              mode={mode}
+              liveData={canEdit}
+              onUpdateRole={onUpdateRole}
+              onUpdateGithubLogin={onUpdateGithubLogin}
+              onDelete={onDelete}
+            />
           </tbody>
         </table>
       </div>
@@ -1942,12 +1908,14 @@ function UserRows({
   mode,
   liveData,
   onUpdateRole,
+  onUpdateGithubLogin,
   onDelete,
 }: {
   users: UserRecord[];
   mode: LoadMode;
   liveData: boolean;
   onUpdateRole: (userId: string, role: "admin" | "reviewer") => void;
+  onUpdateGithubLogin: (userId: string, githubLogin: string) => void;
   onDelete: (userId: string) => void;
 }) {
   if (mode === "loading") {
@@ -1966,6 +1934,22 @@ function UserRows({
           <td>
             <strong>{user.name || user.email}</strong>
             <span className="table-subtext">{user.email}</span>
+          </td>
+          <td>
+            <input
+              aria-label={`GitHub login for ${user.name || user.email}`}
+              defaultValue={user.githubLogin ? `@${user.githubLogin}` : ""}
+              disabled={!liveData}
+              placeholder="@reviewer"
+              onBlur={(event) => {
+                const nextValue = event.target.value.trim();
+                const currentValue = user.githubLogin ? `@${user.githubLogin}` : "";
+                if (nextValue !== currentValue && nextValue !== user.githubLogin) {
+                  onUpdateGithubLogin(user.id, nextValue);
+                }
+              }}
+            />
+            {!user.githubLogin ? <span className="table-subtext">Cannot auto-request</span> : null}
           </td>
           <td>
             <select value={user.role} onChange={(event) => onUpdateRole(user.id, event.target.value as "admin" | "reviewer")} disabled={!liveData}>
@@ -1989,7 +1973,7 @@ function UserRows({
 function UserEmptyRow({ message }: { message: string }) {
   return (
     <tr>
-      <td colSpan={4}>{message}</td>
+      <td colSpan={5}>{message}</td>
     </tr>
   );
 }
@@ -2677,6 +2661,7 @@ function normalizeUser(payload: ApiUserPayload): UserRecord {
     id: payload.user_id,
     email: payload.email,
     name: payload.name || "",
+    githubLogin: payload.github_login,
     role: payload.role,
     createdAt: formatDate(payload.created_at),
   };
@@ -2695,6 +2680,7 @@ function normalizeRepository(payload: ApiRepositoryPayload): RepositoryRecord {
       userId: reviewer.user_id,
       email: reviewer.email,
       name: reviewer.name,
+      githubLogin: reviewer.github_login,
       role: reviewer.role,
     })),
     createdAt: formatDate(payload.created_at),
@@ -2857,6 +2843,17 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function barWidth(value: number, maxValue: number) {
+  if (value <= 0 || maxValue <= 0) {
+    return "0%";
+  }
+  return `${Math.max(4, Math.round((value / maxValue) * 100))}%`;
 }
 
 function formatActor(actorType: string, actorId: string | null) {

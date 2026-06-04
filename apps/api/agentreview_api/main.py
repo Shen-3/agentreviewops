@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agentreview_api.deps import get_session as get_session
-from agentreview_api.routers import analysis, api_keys, audit, auth, policies, repositories, retention, users
+from agentreview_api.routers import analysis, api_keys, audit, auth, metrics, policies, repositories, retention, users
 from agentreview_api.schemas.auth import HealthResponse
 
 __all__ = ["app", "get_session"]
@@ -38,6 +38,7 @@ app.include_router(audit.router)
 app.include_router(retention.router)
 app.include_router(policies.router)
 app.include_router(analysis.router)
+app.include_router(metrics.router)
 
 
 @app.get("/health", response_model=HealthResponse)

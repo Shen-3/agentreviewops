@@ -98,7 +98,7 @@ API keys are role-scoped. Use `admin` keys for governance changes, `ci` keys for
 pnpm --filter agentreviewops-web dev
 ```
 
-Open `http://127.0.0.1:5173` and paste the API key into the dashboard header. API keys are stored in your browser for this self-hosted control plane. Use session-only mode on shared machines, use browser storage only on trusted devices, prefer the least-privileged key role that fits the task, and clear the key when finished. Without a key, the dashboard shows demo data. With a live key, the dashboard detects the key role through `/api/auth/me`: admin keys can manage users, repositories, policies, and keys; CI keys can submit analyses; read-only keys can inspect runs, governance state, and audit exports without mutation controls. Full OAuth or GitHub App browser auth is future work.
+Open `http://127.0.0.1:5173` and paste the API key into the dashboard header. Session-only API key storage is the default. Browser storage keeps the key after the tab closes, so use it only on trusted devices, prefer the least-privileged key role that fits the task, and clear the key when finished. Without a key, the dashboard shows demo data. With a live key, the dashboard detects the key role through `/api/auth/me`: admin keys can manage users, repositories, policies, and keys; CI keys can submit analyses; read-only keys can inspect runs, governance metrics, governance state, and audit exports without mutation controls. Full OAuth or GitHub App browser auth is future work.
 
 ## Legacy/Manual Fallback
 
@@ -120,11 +120,22 @@ pnpm --filter agentreviewops-web dev
 
 ## Configure Policies
 
-Create organization users from the dashboard or `POST /api/users`, then onboard repositories from the dashboard or `POST /api/repositories`. Assign users to repositories with the dashboard routing form or `POST /api/repositories/{repository_id}/memberships`. Update roles from the dashboard or the matching `PATCH` endpoints. Remove stale users, repositories, or reviewer assignments from the same dashboard panels or with the matching `DELETE` endpoints. These governance endpoints require an admin API key.
+Create organization users from the dashboard or `POST /api/users`, then onboard repositories from the dashboard or `POST /api/repositories`. Set each user's optional GitHub login when you want repository memberships to become requestable PR reviewers. AgentReviewOps stores the login without a leading `@`, validates GitHub username syntax, and rejects duplicate logins inside the organization case-insensitively. Emails are not mapped to GitHub users automatically. Assign users to repositories with the dashboard routing form or `POST /api/repositories/{repository_id}/memberships`. Update roles and GitHub login mappings from the dashboard or the matching `PATCH` endpoints. Remove stale users, repositories, or reviewer assignments from the same dashboard panels or with the matching `DELETE` endpoints. These governance endpoints require an admin API key.
 
 Policies saved with `scope: "repository"` and a repository ID apply before organization policies when `POST /api/analyze/diff` receives a matching `repository` value such as `owner/name`. If no repository policy matches, AgentReviewOps uses the latest enabled organization policy, then request config, then defaults. Use the dashboard or `PATCH /api/policies/{policy_id}` to rename, replace, enable, or disable saved policies without deleting their audit history.
 
-Repository list responses include assigned reviewers from repository memberships so analysis audit events can record routing counts and roles without storing raw diffs or reports.
+Repository list responses include assigned reviewers from repository memberships so analysis audit events can record routing counts and roles without storing raw diffs or reports. Repository members with a GitHub login are emitted as `@login` in review routing output; members without one remain visible by email and are skipped by reviewer requests as `missing_github_login`.
+
+## Governance Metrics
+
+The dashboard Governance view reads:
+
+- `GET /api/metrics/overview`
+- `GET /api/metrics/rules`
+- `GET /api/metrics/routing`
+- `GET /api/metrics/repositories`
+
+Metrics are scoped to the authenticated organization and default to the last 30 days. The `days` query parameter accepts 1 through 365. Routing hit rate is configured review requirements divided by total review requirements, and is `0` when no routing requirements exist.
 
 ## Retention Purges
 

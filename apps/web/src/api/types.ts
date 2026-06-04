@@ -81,6 +81,7 @@ export type UserRecord = {
   id: string;
   email: string;
   name: string;
+  githubLogin: string | null;
   role: string;
   createdAt: string;
 };
@@ -101,6 +102,7 @@ export type RepositoryReviewer = {
   userId: string;
   email: string;
   name: string | null;
+  githubLogin: string | null;
   role: string;
 };
 
@@ -155,6 +157,71 @@ export type PolicyRecord = {
   updatedAt: string;
 };
 
+export type MetricsTrendPoint = {
+  date: string;
+  analysis_count: number;
+};
+
+export type MetricsOverview = {
+  analysis_count: number;
+  risk_distribution: Record<RiskLevel, number>;
+  high_or_block_count: number;
+  average_risk_score: number;
+  unique_repository_count: number;
+  unique_agent_count: number;
+  analysis_count_by_agent: Record<string, number>;
+  recent_trend: MetricsTrendPoint[];
+  generated_at: string;
+};
+
+export type MetricsRuleStat = {
+  rule_id: string;
+  finding_count: number;
+  average_score_delta: number;
+  high_impact_count: number;
+};
+
+export type MetricsRules = {
+  total_finding_count: number;
+  severity_distribution: Record<FindingSeverity, number>;
+  high_impact_rule_count: number;
+  top_rules: MetricsRuleStat[];
+  generated_at: string;
+};
+
+export type MetricsUnconfiguredRequirement = {
+  requirement_id: string;
+  title: string;
+  count: number;
+};
+
+export type MetricsRouting = {
+  total_review_requirement_count: number;
+  unconfigured_review_requirement_count: number;
+  configured_review_requirement_count: number;
+  routing_hit_rate: number;
+  reviewer_source_distribution: Record<string, number>;
+  required_role_distribution: Record<string, number>;
+  top_unconfigured_requirements: MetricsUnconfiguredRequirement[];
+  generated_at: string;
+};
+
+export type MetricsRepositoryRow = {
+  repository: string;
+  analysis_count: number;
+  average_risk_score: number;
+  high_or_block_count: number;
+  last_analysis_time: string;
+  top_risk_level: RiskLevel;
+  unconfigured_review_requirement_count: number;
+  top_triggered_rule_ids: string[];
+};
+
+export type MetricsRepositories = {
+  repositories: MetricsRepositoryRow[];
+  generated_at: string;
+};
+
 export type PolicyFormState = {
   name: string;
   enabled: boolean;
@@ -189,6 +256,7 @@ export type RepositoryFormState = {
 export type UserFormState = {
   email: string;
   name: string;
+  githubLogin: string;
   role: "admin" | "reviewer";
 };
 
@@ -282,6 +350,7 @@ export type ApiUserPayload = {
   user_id: string;
   email: string;
   name: string | null;
+  github_login: string | null;
   role: string;
   created_at: string;
 };
@@ -298,6 +367,7 @@ export type ApiRepositoryPayload = {
     user_id: string;
     email: string;
     name: string | null;
+    github_login: string | null;
     role: string;
   }>;
   created_at: string;

@@ -66,6 +66,10 @@ inputs:
     description: "Which reviewers to request: users, teams, or users-and-teams."
     required: false
     default: users-and-teams
+  reviewer-request-failure-mode:
+    description: Whether reviewer request failures should fail the job or only warn. One of warn, fail.
+    required: false
+    default: warn
   github-token:
     description: GitHub token used when github-comment, checks, or request-reviewers is true. Prefer github.token or a GitHub secret.
     required: false
@@ -140,6 +144,7 @@ runs:
         AGENTREVIEW_INPUT_JSON_OUTPUT: ${{ inputs.json-output }}
         AGENTREVIEW_INPUT_REPOSITORY: ${{ inputs.repository }}
         AGENTREVIEW_INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        AGENTREVIEW_INPUT_REVIEWER_REQUEST_FAILURE_MODE: ${{ inputs.reviewer-request-failure-mode }}
         AGENTREVIEW_INPUT_REVIEWER_REQUEST_MODE: ${{ inputs.reviewer-request-mode }}
       run: |
         analysis_file="$AGENTREVIEW_INPUT_JSON_OUTPUT"
@@ -148,7 +153,8 @@ runs:
           --repo "$AGENTREVIEW_INPUT_REPOSITORY" \
           --pr "$AGENTREVIEW_INPUT_PR_NUMBER" \
           --analysis-file "$analysis_file" \
-          --reviewer-request-mode "$AGENTREVIEW_INPUT_REVIEWER_REQUEST_MODE"
+          --reviewer-request-mode "$AGENTREVIEW_INPUT_REVIEWER_REQUEST_MODE" \
+          --reviewer-request-failure-mode "$AGENTREVIEW_INPUT_REVIEWER_REQUEST_FAILURE_MODE"
 
     - name: Submit AgentReviewOps analysis
       if: ${{ inputs.api-url != '' && inputs.api-key != '' }}

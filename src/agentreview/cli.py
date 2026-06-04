@@ -23,7 +23,7 @@ from agentreview.integrations.github import (
     GITHUB_API_BASE_URL,
     GitHubIntegrationError,
     MissingGitHubTokenError,
-    create_or_update_check_run,
+    create_check_run,
     fetch_pull_request_diff,
     request_pull_request_reviewers,
     upsert_pull_request_comment,
@@ -54,6 +54,11 @@ class ReviewerRequestMode(StrEnum):
     USERS = "users"
     TEAMS = "teams"
     USERS_AND_TEAMS = "users-and-teams"
+
+
+class ReviewerRequestFailureMode(StrEnum):
+    WARN = "warn"
+    FAIL = "fail"
 
 
 RISK_LEVEL_ORDER = {
@@ -602,6 +607,11 @@ def request_reviewers(
         "--dry-run",
         help="Resolve and print reviewer requests without calling the GitHub API.",
     ),
+    failure_mode: ReviewerRequestFailureMode = typer.Option(
+        ReviewerRequestFailureMode.FAIL,
+        "--reviewer-request-failure-mode",
+        help="Whether GitHub reviewer request failures warn or fail.",
+    ),
 ) -> None:
     """Request GitHub reviewers from structured AgentReviewOps analysis output."""
     review_requirements = _load_review_requirements_from_analysis_file(analysis_file)
@@ -623,9 +633,14 @@ def request_reviewers(
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=2) from exc
         except GitHubIntegrationError as exc:
-            typer.echo(f"GitHub error: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
-        api_call_status = "requested" if response.get("requested") else "no-op"
+            if failure_mode == ReviewerRequestFailureMode.WARN:
+                typer.echo(f"Warning: GitHub reviewer request failed: {exc}", err=True)
+                api_call_status = "failed-warning"
+            else:
+                typer.echo(f"GitHub error: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+        else:
+            api_call_status = "requested" if response.get("requested") else "no-op"
 
     typer.echo("AgentReviewOps")
     typer.echo(f"GitHub PR: {repo}#{pr_number}")
@@ -767,7 +782,7 @@ def _publish_check_run_for_cli(
         return None
     check_content = analysis_to_check_run_content(result, fail_on=fail_on)
     try:
-        response = create_or_update_check_run(
+        response = create_check_run(
             repo=repo or "",
             head_sha=head_sha or "",
             name=check_name,

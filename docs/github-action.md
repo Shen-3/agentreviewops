@@ -14,6 +14,7 @@ After the first release, use a stable release tag such as `Shen-3/agentreviewops
     sarif-output: agentreview.sarif.json
     request-reviewers: "true"
     reviewer-request-mode: users-and-teams
+    reviewer-request-failure-mode: warn
     fail-on: high
     codeowners-file: .github/CODEOWNERS
 ```
@@ -57,6 +58,7 @@ jobs:
           sarif-output: agentreview.sarif.json
           request-reviewers: "true"
           reviewer-request-mode: users-and-teams
+          reviewer-request-failure-mode: warn
           fail-on: high
           codeowners-file: .github/CODEOWNERS
 
@@ -168,6 +170,7 @@ Reviewer requests are disabled by default. Set `request-reviewers: "true"` to ha
     checks: "true"
     request-reviewers: "true"
     reviewer-request-mode: users-and-teams
+    reviewer-request-failure-mode: warn
     fail-on: high
     codeowners-file: .github/CODEOWNERS
 ```
@@ -180,7 +183,7 @@ permissions:
   pull-requests: write
 ```
 
-`reviewer-request-mode` accepts `users`, `teams`, or `users-and-teams`. The action passes the pull request author to the CLI so AgentReviewOps does not request review from the PR author.
+`reviewer-request-mode` accepts `users`, `teams`, or `users-and-teams`. `reviewer-request-failure-mode` accepts `warn` or `fail`; the action default is `warn`, so GitHub permission errors are printed but do not block comments, checks, or final `fail-on` handling. Set it to `fail` to preserve strict reviewer request failures. The action passes the pull request author to the CLI so AgentReviewOps does not request review from the PR author.
 
 Resolution rules:
 
@@ -188,7 +191,8 @@ Resolution rules:
 - CODEOWNERS `@org/team-slug` becomes a GitHub team reviewer named `team-slug`.
 - Bare CODEOWNERS identifiers are not guessed as teams.
 - Email addresses are skipped with `email_identifier_not_requestable`.
-- Repository membership suggestions without a GitHub login are skipped with `missing_github_login`.
+- Repository membership `@github-login` suggestions become individual reviewers.
+- Repository membership email suggestions are skipped with `missing_github_login`.
 - Emails are not automatically mapped to GitHub users.
 
 Manual equivalent:
@@ -206,7 +210,8 @@ GITHUB_TOKEN="${GITHUB_TOKEN}" agentreview request-reviewers \
   --repo owner/name \
   --pr 123 \
   --analysis-file agentreview-report.json \
-  --reviewer-request-mode users-and-teams
+  --reviewer-request-mode users-and-teams \
+  --reviewer-request-failure-mode warn
 ```
 
 ## Reports And Artifacts

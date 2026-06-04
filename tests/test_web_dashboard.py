@@ -10,7 +10,11 @@ def _dashboard_source() -> str:
         WEB_SRC / "App.tsx",
         WEB_SRC / "api" / "client.ts",
         WEB_SRC / "api" / "types.ts",
+        WEB_SRC / "config" / "defaultPolicy.ts",
+        WEB_SRC / "fixtures" / "demoData.ts",
+        WEB_SRC / "forms" / "defaults.ts",
         WEB_SRC / "hooks" / "useLocalStorage.ts",
+        WEB_SRC / "pages" / "GovernanceMetricsPage.tsx",
     ]
     return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
@@ -22,6 +26,10 @@ def test_dashboard_contains_required_views() -> None:
     assert 'id="root"' in html
     assert "Analysis runs" in source
     assert "Analysis detail" in source
+    assert "Governance metrics" in source
+    assert "Repository risk" in source
+    assert "getMetricsOverview" in source
+    assert "/api/metrics/repositories" in source
     assert "Submit diff" in source
     assert "Analyze diff" in source
     assert "Repositories" in source
@@ -30,6 +38,8 @@ def test_dashboard_contains_required_views() -> None:
     assert "/api/repositories/${repositoryId}" in source
     assert "Users" in source
     assert "userForm" in source
+    assert "GitHub login" in source
+    assert "Emails are not automatically mapped to GitHub users." in source
     assert "Review routing" in source
     assert "membershipForm" in source
     assert "onRemoveMembership" in source
@@ -74,6 +84,8 @@ def test_dashboard_contains_empty_loading_error_states() -> None:
     assert 'method: "PATCH"' in source
     assert 'method: "DELETE"' in source
     assert "/api/policies" in source
+    assert "defaultPolicyConfig" in source
+    assert "emptyDiffSubmitForm" in source
     assert "repository_id" in source
     assert "/api/audit-events?limit=${limit}" in source
     assert "/api/audit-events/export" in source
@@ -99,7 +111,8 @@ def test_dashboard_documents_safer_api_key_storage() -> None:
     assert "Session only" in source
     assert "Browser storage" in source
     assert "Clear API key" in source
-    assert "API keys are stored in your browser for this self-hosted dashboard" in source
+    assert "Session-only mode stores the API key for this browser tab" in source
+    assert "Browser storage keeps the API key after this tab closes" in source
     assert "sessionStorage" in source
     assert "agentreviewops.apiKey" in source
 

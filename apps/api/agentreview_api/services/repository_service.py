@@ -20,6 +20,7 @@ def repository_response(record: RepositoryRecord) -> RepositoryResponse:
                 user_id=membership.user.id,
                 email=membership.user.email,
                 name=membership.user.name,
+                github_login=membership.user.github_login,
                 role=membership.role,
             )
             for membership in sorted(record.memberships, key=lambda item: (item.role, item.user.email))
@@ -34,7 +35,7 @@ def repository_reviewers_for_analysis(repository: RepositoryRecord | None) -> li
     return [
         SuggestedReviewer(
             source="repository_membership",
-            identifier=membership.user.email,
+            identifier=f"@{membership.user.github_login}" if membership.user.github_login else membership.user.email,
             role=membership.role,
         )
         for membership in sorted(repository.memberships, key=lambda item: (item.role, item.user.email))
@@ -46,6 +47,7 @@ def user_response(record: UserRecord) -> UserResponse:
         user_id=record.id,
         email=record.email,
         name=record.name,
+        github_login=record.github_login,
         role=record.role,
         created_at=record.created_at,
     )

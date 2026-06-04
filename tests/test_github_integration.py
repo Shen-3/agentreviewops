@@ -14,6 +14,7 @@ from agentreview.integrations.github import (
     CheckRunAnnotation,
     GitHubIntegrationError,
     MissingGitHubTokenError,
+    create_check_run,
     create_or_update_check_run,
     fetch_pull_request_diff,
     request_pull_request_reviewers,
@@ -262,7 +263,7 @@ def test_create_or_update_check_run_posts_completed_check_payload() -> None:
         )
         return FakeResponse(json.dumps({"html_url": "https://github.com/octo/example/runs/1"}))
 
-    response = create_or_update_check_run(
+    response = create_check_run(
         repo="octo/example",
         head_sha="abc123",
         name="AgentReviewOps",

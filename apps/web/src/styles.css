@@ -258,6 +258,104 @@ nav {
   background: var(--line);
 }
 
+.governance-panel {
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+}
+
+.governance-summary {
+  margin-top: 12px;
+}
+
+.governance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.governance-section {
+  min-width: 0;
+}
+
+.governance-section h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.bar-list,
+.trend-list {
+  display: grid;
+  gap: 8px;
+}
+
+.bar-row,
+.trend-row {
+  display: grid;
+  grid-template-columns: minmax(52px, auto) minmax(70px, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-quiet);
+}
+
+.bar-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.routing-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.routing-metrics div {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.routing-metrics dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.routing-metrics dd {
+  margin: 2px 0 0;
+  font-weight: 800;
+}
+
+.repository-risk-section {
+  margin-top: 18px;
+}
+
+.compact-table-wrap table {
+  min-width: 360px;
+}
+
+.table-note {
+  margin: 8px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reviewer-identity {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .metrics div {
   min-height: 86px;
   background: var(--surface);
@@ -907,6 +1005,7 @@ pre {
   .policy-grid,
   .policy-textareas,
   .rule-grid,
+  .governance-grid,
   .metrics {
     grid-template-columns: 1fr;
   }

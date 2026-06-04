@@ -17,6 +17,7 @@ class RepositoryReviewerResponse(BaseModel):
     user_id: str
     email: str
     name: str | None
+    github_login: str | None
     role: str
 
 

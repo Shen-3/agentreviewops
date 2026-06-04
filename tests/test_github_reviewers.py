@@ -13,6 +13,7 @@ def test_resolve_github_reviewer_request_plan_splits_users_teams_and_skips() -> 
             SuggestedReviewer(source="codeowners", identifier="@octo/security-team"),
             SuggestedReviewer(source="codeowners", identifier="security-team"),
             SuggestedReviewer(source="codeowners", identifier="owner@example.com"),
+            SuggestedReviewer(source="repository_membership", identifier="@alice", role="owner"),
             SuggestedReviewer(source="repository_membership", identifier="maintainer@example.com", role="maintainer"),
             SuggestedReviewer(source="repository_membership", identifier="Engineering", role="reviewer"),
         ]
@@ -25,7 +26,7 @@ def test_resolve_github_reviewer_request_plan_splits_users_teams_and_skips() -> 
     assert {(item.identifier, item.reason) for item in plan.skipped} == {
         ("security-team", "bare_identifier_not_requestable"),
         ("owner@example.com", "email_identifier_not_requestable"),
-        ("maintainer@example.com", "email_identifier_not_requestable"),
+        ("maintainer@example.com", "missing_github_login"),
         ("Engineering", "missing_github_login"),
     }
 
@@ -35,13 +36,17 @@ def test_resolve_github_reviewer_request_plan_excludes_pull_request_author() -> 
         [
             SuggestedReviewer(source="codeowners", identifier="@alice"),
             SuggestedReviewer(source="codeowners", identifier="@bob"),
+            SuggestedReviewer(source="repository_membership", identifier="@Alice", role="maintainer"),
         ]
     )
 
     plan = resolve_github_reviewer_request_plan([requirement], author="Alice")
 
     assert plan.reviewers == ["bob"]
-    assert [(item.identifier, item.reason) for item in plan.skipped] == [("@alice", "pull_request_author")]
+    assert [(item.identifier, item.reason) for item in plan.skipped] == [
+        ("@alice", "pull_request_author"),
+        ("@Alice", "pull_request_author"),
+    ]
 
 
 def test_filter_github_reviewer_request_plan_honors_request_mode() -> None:

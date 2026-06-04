@@ -5,7 +5,18 @@ from collections.abc import Generator
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 DEFAULT_DATABASE_URL = "sqlite:///./agentreview.db"
@@ -41,11 +52,13 @@ class OrganizationRecord(Base):
 
 class UserRecord(Base):
     __tablename__ = "users"
+    __table_args__ = (Index("uq_users_org_github_login", "organization_id", "github_login", unique=True),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     name: Mapped[str | None] = mapped_column(String(255))
+    github_login: Mapped[str | None] = mapped_column(String(39))
     role: Mapped[str] = mapped_column(String(50), default="admin", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

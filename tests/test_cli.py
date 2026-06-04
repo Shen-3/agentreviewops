@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from agentreview.cli import app
+from agentreview.integrations.github import GitHubIntegrationError
 from agentreview_api.db import create_session_factory
 from agentreview_api.main import app as api_app
 from agentreview_api.main import get_session
@@ -171,7 +172,7 @@ def test_scan_diff_can_publish_github_check(monkeypatch, tmp_path: Path) -> None
         return {"html_url": "https://github.com/octo/example/runs/1"}
 
     monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
-    monkeypatch.setattr("agentreview.cli.create_or_update_check_run", fake_create_check)
+    monkeypatch.setattr("agentreview.cli.create_check_run", fake_create_check)
 
     result = runner.invoke(
         app,
@@ -618,8 +619,49 @@ def test_request_reviewers_dry_run_prints_resolved_plan(tmp_path: Path) -> None:
     assert "Requested individual reviewers: none" in result.output
     assert "Requested team reviewers: security-team" in result.output
     assert "- @alice: pull_request_author (codeowners)" in result.output
-    assert "- owner@example.com: email_identifier_not_requestable (repository_membership)" in result.output
+    assert "- owner@example.com: missing_github_login (repository_membership)" in result.output
     assert "GitHub API call: dry-run" in result.output
+
+
+def test_request_reviewers_warn_mode_continues_on_github_error(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    analysis_file = _write_analysis_json(
+        tmp_path,
+        [
+            {
+                "requirement_id": "security-review",
+                "title": "Security review",
+                "reason": "Sensitive change",
+                "suggested_reviewers": [{"source": "codeowners", "identifier": "@alice"}],
+            }
+        ],
+    )
+
+    def fake_request_pull_request_reviewers(**_kwargs):
+        raise GitHubIntegrationError("Resource not accessible by integration")
+
+    monkeypatch.setenv("GITHUB_TOKEN", "ghs_secret")
+    monkeypatch.setattr("agentreview.cli.request_pull_request_reviewers", fake_request_pull_request_reviewers)
+
+    result = runner.invoke(
+        app,
+        [
+            "request-reviewers",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--analysis-file",
+            str(analysis_file),
+            "--reviewer-request-failure-mode",
+            "warn",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Warning: GitHub reviewer request failed" in result.output
+    assert "GitHub API call: failed-warning" in result.output
+    assert "ghs_secret" not in result.output
 
 
 def test_request_reviewers_noop_does_not_require_token(monkeypatch, tmp_path: Path) -> None:
