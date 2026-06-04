@@ -5,82 +5,103 @@ WEB_ROOT = PROJECT_ROOT / "apps" / "web"
 WEB_SRC = WEB_ROOT / "src"
 
 
+def _dashboard_source() -> str:
+    paths = [
+        WEB_SRC / "App.tsx",
+        WEB_SRC / "api" / "client.ts",
+        WEB_SRC / "api" / "types.ts",
+        WEB_SRC / "hooks" / "useLocalStorage.ts",
+    ]
+    return "\n".join(path.read_text(encoding="utf-8") for path in paths)
+
+
 def test_dashboard_contains_required_views() -> None:
     html = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
-    app_tsx = (WEB_SRC / "main.tsx").read_text(encoding="utf-8")
+    source = _dashboard_source()
 
     assert 'id="root"' in html
-    assert "Analysis runs" in app_tsx
-    assert "Analysis detail" in app_tsx
-    assert "Submit diff" in app_tsx
-    assert "Analyze diff" in app_tsx
-    assert "Repositories" in app_tsx
-    assert "repositoryForm" in app_tsx
-    assert "deleteDashboardRepository" in app_tsx
-    assert "/api/repositories/${repositoryId}" in app_tsx
-    assert "Users" in app_tsx
-    assert "userForm" in app_tsx
-    assert "Review routing" in app_tsx
-    assert "membershipForm" in app_tsx
-    assert "onRemoveMembership" in app_tsx
-    assert "Findings" in app_tsx
-    assert "Required review" in app_tsx
-    assert "reviewRequirements" in app_tsx
-    assert "Report preview" in app_tsx
-    assert "Policy editor" in app_tsx
-    assert "Repository policy" in app_tsx
-    assert "Save policy" in app_tsx
-    assert "onToggleEnabled" in app_tsx
-    assert "/api/policies/${policy.id}" in app_tsx
-    assert "policy.updated" in app_tsx
-    assert "API keys" in app_tsx
-    assert "New key role" in app_tsx
-    assert "read_only" in app_tsx
-    assert "Audit history" in app_tsx
-    assert "Download" in app_tsx
-    assert "riskFilter" in app_tsx
-    assert "auditActionFilter" in app_tsx
-    assert "API key" in app_tsx
-    assert "Authorization" in app_tsx
-    assert "/api/auth/me" in app_tsx
-    assert "canSubmitAnalysis" in app_tsx
-    assert "canManageGovernance" in app_tsx
-    assert "Read-only keys can inspect analyses but cannot submit diffs." in app_tsx
-    assert "CI keys can submit analyses but cannot manage governance." in app_tsx
+    assert "Analysis runs" in source
+    assert "Analysis detail" in source
+    assert "Submit diff" in source
+    assert "Analyze diff" in source
+    assert "Repositories" in source
+    assert "repositoryForm" in source
+    assert "deleteDashboardRepository" in source
+    assert "/api/repositories/${repositoryId}" in source
+    assert "Users" in source
+    assert "userForm" in source
+    assert "Review routing" in source
+    assert "membershipForm" in source
+    assert "onRemoveMembership" in source
+    assert "Findings" in source
+    assert "Required review" in source
+    assert "reviewRequirements" in source
+    assert "Report preview" in source
+    assert "Policy editor" in source
+    assert "Repository policy" in source
+    assert "Save policy" in source
+    assert "onToggleEnabled" in source
+    assert "/api/policies/${policyId}" in source
+    assert "policy.updated" in source
+    assert "API keys" in source
+    assert "New key role" in source
+    assert "read_only" in source
+    assert "Audit history" in source
+    assert "Download" in source
+    assert "riskFilter" in source
+    assert "auditActionFilter" in source
+    assert "API key" in source
+    assert "Authorization" in source
+    assert "/api/auth/me" in source
+    assert "canSubmitAnalysis" in source
+    assert "canManageGovernance" in source
+    assert "Read-only keys can inspect analyses but cannot submit diffs." in source
+    assert "CI keys can submit analyses but cannot manage governance." in source
 
 
 def test_dashboard_contains_empty_loading_error_states() -> None:
-    app_tsx = (WEB_SRC / "main.tsx").read_text(encoding="utf-8")
+    source = _dashboard_source()
 
-    assert "Loading workspace data" in app_tsx
-    assert "Unable to load workspace data" in app_tsx
-    assert "No analysis runs or audit events" in app_tsx
-    assert "/api/analysis-runs" in app_tsx
-    assert "/api/analyze/diff" in app_tsx
-    assert "/api/api-keys" in app_tsx
-    assert "/api/users" in app_tsx
-    assert "/api/repositories" in app_tsx
-    assert "/memberships" in app_tsx
-    assert 'method: "PATCH"' in app_tsx
-    assert 'method: "DELETE"' in app_tsx
-    assert "/api/policies" in app_tsx
-    assert "repository_id" in app_tsx
-    assert "/api/audit-events?limit=50" in app_tsx
-    assert "/api/audit-events/export" in app_tsx
-    assert "No API key configured. Showing demo analysis and audit data." in app_tsx
-    assert "Unable to load workspace data. Check the API URL, API key, or retry later." in app_tsx
-    assert "require_tests_for_code_changes" in app_tsx
-    assert "critical_paths" in app_tsx
+    assert "Loading workspace data" in source
+    assert "Unable to load workspace data" in source
+    assert "No analysis runs or audit events" in source
+    assert "/api/analysis-runs" in source
+    assert "/api/analyze/diff" in source
+    assert "/api/api-keys" in source
+    assert "/api/users" in source
+    assert "/api/repositories" in source
+    assert "/memberships" in source
+    assert 'method: "PATCH"' in source
+    assert 'method: "DELETE"' in source
+    assert "/api/policies" in source
+    assert "repository_id" in source
+    assert "/api/audit-events?limit=${limit}" in source
+    assert "/api/audit-events/export" in source
+    assert "No API key configured. Showing demo analysis and audit data." in source
+    assert "Unable to load workspace data. Check the API URL, API key, or retry later." in source
+    assert "require_tests_for_code_changes" in source
+    assert "critical_paths" in source
 
 
 def test_dashboard_does_not_expose_debug_state_controls() -> None:
-    app_tsx = (WEB_SRC / "main.tsx").read_text(encoding="utf-8")
+    source = _dashboard_source()
 
-    assert "AlertTriangle" not in app_tsx
-    assert "Database" not in app_tsx
-    assert "Live data" not in app_tsx
-    assert "Refresh" in app_tsx
-    assert "No API key configured. Showing demo analysis and audit data." in app_tsx
+    assert "AlertTriangle" not in source
+    assert "Database" not in source
+    assert "Live data" not in source
+    assert "Refresh" in source
+    assert "No API key configured. Showing demo analysis and audit data." in source
+
+
+def test_dashboard_documents_safer_api_key_storage() -> None:
+    source = _dashboard_source()
+
+    assert "Session only" in source
+    assert "Browser storage" in source
+    assert "Clear API key" in source
+    assert "API keys are stored in your browser for this self-hosted dashboard" in source
+    assert "sessionStorage" in source
+    assert "agentreviewops.apiKey" in source
 
 
 def test_dashboard_has_responsive_styles() -> None:

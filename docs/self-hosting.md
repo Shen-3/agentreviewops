@@ -98,7 +98,7 @@ API keys are role-scoped. Use `admin` keys for governance changes, `ci` keys for
 pnpm --filter agentreviewops-web dev
 ```
 
-Open `http://127.0.0.1:5173` and paste the API key into the dashboard header. Without a key, the dashboard shows demo data. With a live key, the dashboard detects the key role through `/api/auth/me`: admin keys can manage users, repositories, policies, and keys; CI keys can submit analyses; read-only keys can inspect runs, governance state, and audit exports without mutation controls.
+Open `http://127.0.0.1:5173` and paste the API key into the dashboard header. API keys are stored in your browser for this self-hosted control plane. Use session-only mode on shared machines, use browser storage only on trusted devices, prefer the least-privileged key role that fits the task, and clear the key when finished. Without a key, the dashboard shows demo data. With a live key, the dashboard detects the key role through `/api/auth/me`: admin keys can manage users, repositories, policies, and keys; CI keys can submit analyses; read-only keys can inspect runs, governance state, and audit exports without mutation controls. Full OAuth or GitHub App browser auth is future work.
 
 ## Legacy/Manual Fallback
 
