@@ -33,22 +33,26 @@ def test_root_composite_action_yaml_is_valid() -> None:
     action = yaml.safe_load((PROJECT_ROOT / "action.yml").read_text(encoding="utf-8"))
 
     assert action["name"] == "AgentReviewOps"
+    assert action["author"] == "AgentReviewOps contributors"
+    assert action["branding"]["icon"] == "shield"
     assert action["runs"]["using"] == "composite"
     assert "github-token" in action["inputs"]
     assert action["inputs"]["comment"]["default"] == "true"
+    assert action["inputs"]["json-output"]["default"] == ""
+    assert action["inputs"]["sarif-output"]["default"] == ""
     assert action["inputs"]["request-reviewers"]["default"] == "false"
     assert action["inputs"]["reviewer-request-mode"]["default"] == "users-and-teams"
     assert action["inputs"]["checks"]["default"] == "false"
     assert action["inputs"]["check-name"]["default"] == "AgentReviewOps"
     assert action["inputs"]["check-title"]["default"] == "AgentReviewOps policy gate"
-    assert action["inputs"]["sarif-output"]["default"] == ""
     assert action["inputs"]["fail-on"]["default"] == "never"
     assert action["inputs"]["codeowners-file"]["default"] == ""
     assert "diff-file" in action["inputs"]
     assert "api-url" in action["inputs"]
     assert "api-key" in action["inputs"]
     steps = str(action["runs"]["steps"])
-    assert 'python -m pip install -e "$GITHUB_ACTION_PATH"' in steps
+    assert 'python -m pip install "$GITHUB_ACTION_PATH"' in steps
+    assert "pip install -e" not in steps
     assert "git diff --no-ext-diff" in steps
     assert "agentreview scan-diff" in steps
     assert "--json-output" in steps
@@ -64,10 +68,26 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert "agentreview comment-pr" in steps
 
 
+def test_action_self_test_workflow_is_read_only_and_uses_local_action() -> None:
+    workflow = yaml.safe_load((PROJECT_ROOT / ".github" / "workflows" / "action-self-test.yml").read_text(encoding="utf-8"))
+
+    assert workflow["name"] == "Action Self Test"
+    assert workflow["permissions"] == {"contents": "read"}
+    steps = workflow["jobs"]["local-action"]["steps"]
+    assert any(step.get("uses") == "./" for step in steps)
+    steps_text = str(steps)
+    assert "comment': 'false'" in steps_text
+    assert "checks': 'false'" in steps_text
+    assert "request-reviewers': 'false'" in steps_text
+    assert "agentreview-self-test-report.json" in steps_text
+    assert "agentreview-self-test.sarif.json" in steps_text
+
+
 def test_github_action_docs_explain_artifact_flow() -> None:
     docs = (PROJECT_ROOT / "docs" / "github-action.md").read_text(encoding="utf-8")
 
-    assert "Shen-3/agentreviewops@main" in docs
+    assert "Shen-3/agentreviewops@v0" in docs
+    assert "Use `Shen-3/agentreviewops@main` only for development" in docs
     assert "fail-on: high" in docs
     assert "codeowners-file: .github/CODEOWNERS" in docs
     assert "Review Routing And CODEOWNERS" in docs
@@ -82,3 +102,29 @@ def test_github_action_docs_explain_artifact_flow() -> None:
     assert "actions/setup-python@v6" in docs
     assert "actions/upload-artifact@v4" in docs
     assert "pull-requests: write" in docs
+    assert "checks: write" in docs
+    assert "security-events: write" in docs
+
+
+def test_release_docs_exist_and_document_validation() -> None:
+    docs = (PROJECT_ROOT / "docs" / "release.md").read_text(encoding="utf-8")
+
+    assert "uv sync --extra dev" in docs
+    assert "uv run pytest" in docs
+    assert "pnpm install --frozen-lockfile" in docs
+    assert "git tag -a v0.x.y" in docs
+    assert "git push origin -f v0" in docs
+
+
+def test_docs_do_not_use_main_as_production_default() -> None:
+    docs_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            PROJECT_ROOT / "README.md",
+            PROJECT_ROOT / "docs" / "github-action.md",
+            PROJECT_ROOT / "docs" / "sarif.md",
+        ]
+    )
+
+    assert "uses: Shen-3/agentreviewops@main" not in docs_text
+    assert "For production, pin to a release tag or a full commit SHA" in docs_text

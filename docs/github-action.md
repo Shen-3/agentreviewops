@@ -2,8 +2,10 @@
 
 The recommended GitHub Actions entrypoint is the root composite action:
 
+After the first release, use a stable release tag such as `Shen-3/agentreviewops@v0`. For production, pin to a release tag or a full commit SHA. Use `Shen-3/agentreviewops@main` only for development or testing unreleased changes.
+
 ```yaml
-- uses: Shen-3/agentreviewops@main
+- uses: Shen-3/agentreviewops@v0
   with:
     github-token: ${{ github.token }}
     config: .agentreview.yml
@@ -19,6 +21,8 @@ The recommended GitHub Actions entrypoint is the root composite action:
 The action installs AgentReviewOps from its own `$GITHUB_ACTION_PATH`, builds a pull request diff when `diff-file` is not provided, writes a Markdown report, optionally posts the report as a PR comment, optionally requests GitHub reviewers, optionally submits the analysis to a self-hosted AgentReviewOps API, and applies the configured CI failure threshold.
 
 Keep API keys in GitHub Secrets. Do not echo GitHub tokens, AgentReviewOps API keys, or OpenAI-compatible provider keys from workflow steps.
+
+The composite action installs the local package with `python -m pip install "$GITHUB_ACTION_PATH"` instead of editable install. It still resolves Python package dependencies at runtime; a future hardening step could publish a prebuilt Docker action or pinned wheel artifact.
 
 ## Recommended Workflow
 
@@ -44,7 +48,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: Shen-3/agentreviewops@main
+      - uses: Shen-3/agentreviewops@v0
         with:
           github-token: ${{ github.token }}
           config: .agentreview.yml
@@ -80,7 +84,7 @@ The action still writes the report and runs configured comment/submission steps 
 Set `checks: "true"` to publish an AgentReviewOps GitHub Check Run. Checks are useful alongside PR comments when you want a branch protection rule to require the AgentReviewOps policy gate.
 
 ```yaml
-- uses: Shen-3/agentreviewops@main
+- uses: Shen-3/agentreviewops@v0
   with:
     github-token: ${{ github.token }}
     comment: "true"
@@ -112,7 +116,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@v6
-  - uses: Shen-3/agentreviewops@main
+  - uses: Shen-3/agentreviewops@v0
     with:
       github-token: ${{ github.token }}
       sarif-output: agentreview.sarif.json
@@ -140,7 +144,7 @@ AgentReviewOps can turn deterministic findings into required human review requir
 Pass `codeowners-file` when your CODEOWNERS file lives in a non-standard path or you want explicit control:
 
 ```yaml
-- uses: Shen-3/agentreviewops@main
+- uses: Shen-3/agentreviewops@v0
   with:
     github-token: ${{ github.token }}
     config: .agentreview.yml
@@ -156,7 +160,7 @@ When `codeowners-file` is omitted, the CLI looks for `.github/CODEOWNERS`, `CODE
 Reviewer requests are disabled by default. Set `request-reviewers: "true"` to have the action write structured analysis JSON with `agentreview scan-diff --json-output` and then run `agentreview request-reviewers` against that file.
 
 ```yaml
-- uses: Shen-3/agentreviewops@main
+- uses: Shen-3/agentreviewops@v0
   with:
     github-token: ${{ github.token }}
     config: .agentreview.yml
@@ -224,7 +228,7 @@ To retain the report as a workflow artifact, add an upload step after the action
 Pass `api-url` and `api-key` to submit the same diff to a self-hosted AgentReviewOps API:
 
 ```yaml
-- uses: Shen-3/agentreviewops@main
+- uses: Shen-3/agentreviewops@v0
   with:
     github-token: ${{ github.token }}
     config: .agentreview.yml

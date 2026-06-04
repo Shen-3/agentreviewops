@@ -6,6 +6,8 @@ Use it when your team uses Cursor, Copilot, Devin, Codex, Claude Code, or other 
 
 ## Recommended GitHub Action Usage
 
+After the first release, use a stable release tag such as `Shen-3/agentreviewops@v0`. For production, pin to a release tag or a full commit SHA; use `@main` only when testing unreleased changes.
+
 ```yaml
 name: AgentReviewOps
 
@@ -25,7 +27,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: Shen-3/agentreviewops@main
+      - uses: Shen-3/agentreviewops@v0
         with:
           github-token: ${{ github.token }}
           config: .agentreview.yml

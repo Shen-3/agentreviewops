@@ -1,0 +1,45 @@
+name: Action Self Test
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - action.yml
+      - .github/workflows/action-self-test.yml
+      - src/agentreview/**
+      - tests/**
+      - docs/**
+      - README.md
+      - pyproject.toml
+      - uv.lock
+
+permissions:
+  contents: read
+
+jobs:
+  local-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./
+        with:
+          diff-file: examples/sample.diff
+          config: .agentreview.example.yml
+          output: agentreview-self-test-report.md
+          json-output: agentreview-self-test-report.json
+          sarif-output: agentreview-self-test.sarif.json
+          comment: "false"
+          checks: "false"
+          request-reviewers: "false"
+          fail-on: never
+
+      - name: Verify action outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s agentreview-self-test-report.md
+          test -s agentreview-self-test-report.json
+          test -s agentreview-self-test.sarif.json
+          python -m json.tool agentreview-self-test-report.json >/dev/null
+          python -m json.tool agentreview-self-test.sarif.json >/dev/null

@@ -13,6 +13,8 @@ agentreview scan-diff \
 
 Use SARIF in GitHub Actions:
 
+After the first release, use `Shen-3/agentreviewops@v0` or pin to a full commit SHA. Use `@main` only for development or unreleased changes.
+
 ```yaml
 name: AgentReviewOps SARIF
 
@@ -28,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: Shen-3/agentreviewops@main
+      - uses: Shen-3/agentreviewops@v0
         with:
           github-token: ${{ github.token }}
           sarif-output: agentreview.sarif.json
