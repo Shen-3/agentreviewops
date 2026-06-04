@@ -388,3 +388,7 @@ The CLI runs locally without sending source code to external services.
 ## Contributing
 
 Keep changes focused and testable. Public commands should be documented, and new behavior should include tests. Run the local quality gates before opening or updating a pull request.
+
+### Backend Structure
+
+The FastAPI backend is composed from `apps/api/agentreview_api/main.py`. Request and response models live in `schemas/`, route handlers live in `routers/`, and non-trivial policy, analysis, audit, repository, and retention logic lives in `services/`. Keep endpoint paths, auth dependencies, and response payloads stable when moving code between these modules.
