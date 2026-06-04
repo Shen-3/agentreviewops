@@ -67,3 +67,7 @@ def test_alembic_upgrade_creates_analysis_tables(tmp_path: Path, monkeypatch) ->
         "ix_policies_repository_id",
         "ix_policies_org_scope_repo_enabled",
     } <= policy_indexes
+
+    version_columns = {column["name"]: column for column in inspector.get_columns("alembic_version")}
+    version_num_type = version_columns["version_num"]["type"]
+    assert getattr(version_num_type, "length", None) == 255
