@@ -31,6 +31,7 @@ from agentreview.integrations.github import (
 from agentreview.models import ReviewRequirement
 from agentreview.plugins import PluginError
 from agentreview.routing import load_codeowners_text
+from agentreview.sarif import analysis_to_sarif
 
 app = typer.Typer(
     name="agentreview",
@@ -221,6 +222,12 @@ def scan_diff(
         dir_okay=False,
         help="Optional path where structured JSON analysis output will be written.",
     ),
+    sarif_output: Path | None = typer.Option(
+        None,
+        "--sarif-output",
+        dir_okay=False,
+        help="Optional path where SARIF 2.1.0 analysis output will be written.",
+    ),
 ) -> None:
     """Analyze a unified diff and write a Markdown review report."""
     _validate_checks_context(checks=checks, repo=repo, head_sha=head_sha)
@@ -255,6 +262,7 @@ def scan_diff(
         typer.echo(f"Could not write report to {output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     _write_json_output_for_cli(json_output, result, fail_on=fail_on.value, source="scan-diff")
+    _write_sarif_output_for_cli(sarif_output, result)
     check_url = _publish_check_run_for_cli(
         checks=checks,
         result=result,
@@ -459,6 +467,12 @@ def scan_pr(
         dir_okay=False,
         help="Optional path where structured JSON analysis output will be written.",
     ),
+    sarif_output: Path | None = typer.Option(
+        None,
+        "--sarif-output",
+        dir_okay=False,
+        help="Optional path where SARIF 2.1.0 analysis output will be written.",
+    ),
 ) -> None:
     """Fetch a GitHub pull request diff and write a Markdown review report."""
     _validate_checks_context(checks=checks, repo=repo, head_sha=head_sha)
@@ -498,6 +512,7 @@ def scan_pr(
         typer.echo(f"Could not write report to {output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     _write_json_output_for_cli(json_output, result, fail_on=fail_on.value, source="scan-pr")
+    _write_sarif_output_for_cli(sarif_output, result)
     check_url = _publish_check_run_for_cli(
         checks=checks,
         result=result,
@@ -702,6 +717,20 @@ def _write_json_output_for_cli(
         write_analysis_json_output(json_output, result, fail_on=fail_on, source=source)
     except OSError as exc:
         typer.echo(f"Could not write JSON analysis output to {json_output}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _write_sarif_output_for_cli(sarif_output: Path | None, result) -> None:
+    if sarif_output is None:
+        return
+    try:
+        sarif_output.parent.mkdir(parents=True, exist_ok=True)
+        sarif_output.write_text(
+            json.dumps(analysis_to_sarif(result), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        typer.echo(f"Could not write SARIF output to {sarif_output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
 

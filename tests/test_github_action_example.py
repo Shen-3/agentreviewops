@@ -41,6 +41,7 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert action["inputs"]["checks"]["default"] == "false"
     assert action["inputs"]["check-name"]["default"] == "AgentReviewOps"
     assert action["inputs"]["check-title"]["default"] == "AgentReviewOps policy gate"
+    assert action["inputs"]["sarif-output"]["default"] == ""
     assert action["inputs"]["fail-on"]["default"] == "never"
     assert action["inputs"]["codeowners-file"]["default"] == ""
     assert "diff-file" in action["inputs"]
@@ -52,6 +53,7 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert "agentreview scan-diff" in steps
     assert "--json-output" in steps
     assert "--checks" in steps
+    assert "--sarif-output" in steps
     assert "--head-sha" in steps
     assert "--check-name" in steps
     assert "agentreview request-reviewers" in steps

@@ -14,6 +14,10 @@ inputs:
     description: Path where the Markdown report should be written.
     required: false
     default: agentreview-report.md
+  sarif-output:
+    description: Optional path to write AgentReviewOps SARIF output.
+    required: false
+    default: ""
   api-url:
     description: Optional AgentReviewOps API base URL for dashboard submission.
     required: false
@@ -99,12 +103,14 @@ runs:
         AGENTREVIEW_INPUT_OUTPUT: ${{ inputs.output }}
         AGENTREVIEW_INPUT_REPOSITORY: ${{ inputs.repository }}
         AGENTREVIEW_INPUT_REQUEST_REVIEWERS: ${{ inputs.request-reviewers }}
+        AGENTREVIEW_INPUT_SARIF_OUTPUT: ${{ inputs.sarif-output }}
       run: |
         args=(
           --diff-file "$AGENTREVIEW_INPUT_DIFF_FILE"
           --config "$AGENTREVIEW_INPUT_CONFIG"
           --output "$AGENTREVIEW_INPUT_OUTPUT"
         )
+        if [ -n "$AGENTREVIEW_INPUT_SARIF_OUTPUT" ]; then args+=(--sarif-output "$AGENTREVIEW_INPUT_SARIF_OUTPUT"); fi
         if [ "$AGENTREVIEW_INPUT_CHECKS" = "true" ]; then
           args+=(
             --checks

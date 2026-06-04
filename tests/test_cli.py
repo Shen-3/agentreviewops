@@ -112,6 +112,37 @@ def test_scan_diff_writes_structured_json_output(tmp_path: Path) -> None:
     assert {"@alice", "@octo/security-team", "owner@example.com"} <= reviewer_identifiers
 
 
+def test_scan_diff_writes_sarif_output(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    output_path = tmp_path / "agentreview-report.md"
+    sarif_output_path = tmp_path / "artifacts" / "agentreview.sarif.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--config",
+            str(project_root / ".agentreview.example.yml"),
+            "--output",
+            str(output_path),
+            "--sarif-output",
+            str(sarif_output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    sarif = json.loads(sarif_output_path.read_text(encoding="utf-8"))
+    assert sarif["version"] == "2.1.0"
+    assert sarif["runs"][0]["tool"]["driver"]["name"] == "AgentReviewOps"
+    assert "critical-path-change" in {
+        result["ruleId"]
+        for result in sarif["runs"][0]["results"]
+    }
+
+
 def test_scan_diff_checks_requires_repo_and_head_sha(tmp_path: Path) -> None:
     runner = CliRunner()
     project_root = Path(__file__).parents[1]

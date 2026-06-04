@@ -334,6 +334,7 @@ def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Pat
     runner = CliRunner()
     output_path = tmp_path / "pr-report.md"
     json_output_path = tmp_path / "pr-report.json"
+    sarif_output_path = tmp_path / "pr-report.sarif.json"
     monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
     monkeypatch.setattr("agentreview.cli.fetch_pull_request_diff", lambda **_kwargs: SAMPLE_DIFF)
 
@@ -349,6 +350,8 @@ def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Pat
             str(output_path),
             "--json-output",
             str(json_output_path),
+            "--sarif-output",
+            str(sarif_output_path),
         ],
     )
 
@@ -359,6 +362,9 @@ def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Pat
     payload = json.loads(json_output_path.read_text(encoding="utf-8"))
     assert payload["metadata"]["source"] == "scan-pr"
     assert payload["changed_files"][0]["path"] == "README.md"
+    sarif = json.loads(sarif_output_path.read_text(encoding="utf-8"))
+    assert sarif["version"] == "2.1.0"
+    assert sarif["runs"][0]["tool"]["driver"]["name"] == "AgentReviewOps"
 
 
 def test_scan_pr_checks_requires_head_sha(monkeypatch, tmp_path: Path) -> None:

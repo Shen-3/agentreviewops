@@ -18,6 +18,10 @@ inputs:
     description: Path where the Markdown report should be written.
     required: false
     default: agentreview-report.md
+  sarif-output:
+    description: Optional path to write AgentReviewOps SARIF output.
+    required: false
+    default: ""
   comment:
     description: Set to true to post or update the generated report as a GitHub pull request comment.
     required: false
@@ -172,6 +176,7 @@ runs:
         AGENTREVIEW_OUTPUT: ${{ inputs.output }}
         AGENTREVIEW_REPOSITORY: ${{ steps.prepare.outputs.repository }}
         AGENTREVIEW_REQUEST_REVIEWERS: ${{ inputs.request-reviewers }}
+        AGENTREVIEW_SARIF_OUTPUT: ${{ inputs.sarif-output }}
       run: |
         set +e
         args=(
@@ -181,6 +186,7 @@ runs:
           --fail-on "$AGENTREVIEW_FAIL_ON"
         )
         if [ -n "$AGENTREVIEW_CODEOWNERS_FILE" ]; then args+=(--codeowners-file "$AGENTREVIEW_CODEOWNERS_FILE"); fi
+        if [ -n "$AGENTREVIEW_SARIF_OUTPUT" ]; then args+=(--sarif-output "$AGENTREVIEW_SARIF_OUTPUT"); fi
         if [ "$AGENTREVIEW_CHECKS" = "true" ]; then
           args+=(
             --checks

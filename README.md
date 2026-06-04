@@ -31,10 +31,16 @@ jobs:
           config: .agentreview.yml
           comment: "true"
           checks: "true"
+          sarif-output: agentreview.sarif.json
           request-reviewers: "true"
           reviewer-request-mode: users-and-teams
           fail-on: high
           codeowners-file: .github/CODEOWNERS
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: agentreview.sarif.json
 ```
 
 `fail-on` controls the CI threshold. For example, `fail-on: high` exits non-zero for `high` or `block` risk after the Markdown report and optional PR comment are produced.
@@ -46,6 +52,7 @@ permissions:
   contents: read
   pull-requests: write
   checks: write
+  security-events: write
 ```
 
 ## Current Status
@@ -104,6 +111,7 @@ python -m venv .venv
 ```bash
 agentreview --help
 agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md --json-output agentreview-report.json --fail-on high --codeowners-file .github/CODEOWNERS
+agentreview scan-diff --diff-file examples/sample.diff --output agentreview-report.md --sarif-output agentreview.sarif.json
 GITHUB_TOKEN=<github-token> agentreview scan-diff --diff-file examples/sample.diff --output agentreview-report.md --checks --repo owner/name --head-sha <sha> --fail-on high
 AGENTREVIEW_API_KEY=<api-key> agentreview submit-diff --diff-file examples/sample.diff --api-url http://127.0.0.1:8000 --repository owner/name --pr 123
 GITHUB_TOKEN=<github-token> agentreview scan-pr --repo owner/name --pr 123 --head-sha <sha> --checks --output agentreview-report.md --json-output agentreview-report.json --fail-on high --codeowners-file .github/CODEOWNERS
@@ -118,6 +126,8 @@ Expected scan output includes the risk level, positive findings, and the report 
 `--json-output` writes structured analysis JSON for `scan-diff` and `scan-pr`, including risk, decision, findings, changed files, review requirements, and metadata. The JSON is produced from structured analysis objects, not parsed from Markdown.
 
 `--checks` publishes a completed GitHub Check Run using the Checks API. It maps `--fail-on` decisions to `failure`, findings below the failure threshold to `neutral`, and clean scans to `success`. Use checks alongside PR comments when you want branch protection to require the AgentReviewOps policy gate. Check annotations are emitted only for findings with file and line locations and are capped at 50 annotations.
+
+`--sarif-output` writes SARIF 2.1.0 JSON for GitHub Code Scanning or other SARIF-compatible tools. SARIF is an export format, not a replacement for PR comments or checks. Not every deterministic finding has line-level location data, and GitHub Code Scanning availability depends on repository and organization settings.
 
 `--codeowners-file` lets scan commands use an explicit CODEOWNERS file for human review routing. When omitted, AgentReviewOps looks for `.github/CODEOWNERS`, `CODEOWNERS`, then `docs/CODEOWNERS`; missing CODEOWNERS files are not an error unless you explicitly pass a missing path.
 

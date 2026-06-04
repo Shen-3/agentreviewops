@@ -9,6 +9,7 @@ The recommended GitHub Actions entrypoint is the root composite action:
     config: .agentreview.yml
     comment: "true"
     checks: "true"
+    sarif-output: agentreview.sarif.json
     request-reviewers: "true"
     reviewer-request-mode: users-and-teams
     fail-on: high
@@ -33,6 +34,7 @@ permissions:
   contents: read
   pull-requests: write
   checks: write
+  security-events: write
 
 jobs:
   review-gate:
@@ -48,10 +50,16 @@ jobs:
           config: .agentreview.yml
           comment: "true"
           checks: "true"
+          sarif-output: agentreview.sarif.json
           request-reviewers: "true"
           reviewer-request-mode: users-and-teams
           fail-on: high
           codeowners-file: .github/CODEOWNERS
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: agentreview.sarif.json
 ```
 
 When `diff-file` is omitted on `pull_request` or `pull_request_target` events, the action reads the event payload, resolves the base/head SHAs, and writes a temporary unified diff before running `agentreview scan-diff`.
@@ -92,6 +100,38 @@ permissions:
 ```
 
 The check conclusion is `failure` when the configured `fail-on` threshold is met, `neutral` when findings exist below the failure threshold, and `success` when there are no positive deterministic findings. GitHub annotations are emitted only for findings with file and line locations, and the first implementation caps annotations at 50. Findings without line locations remain visible in the check summary/text and Markdown report.
+
+## SARIF Export
+
+Set `sarif-output` to write SARIF 2.1.0 output for GitHub Code Scanning or other SARIF-compatible tooling. The action writes the SARIF file but does not upload it automatically.
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+
+steps:
+  - uses: actions/checkout@v6
+  - uses: Shen-3/agentreviewops@main
+    with:
+      github-token: ${{ github.token }}
+      sarif-output: agentreview.sarif.json
+      fail-on: never
+  - uses: github/codeql-action/upload-sarif@v3
+    with:
+      sarif_file: agentreview.sarif.json
+```
+
+Local generation:
+
+```bash
+agentreview scan-diff \
+  --diff-file agentreview.diff \
+  --output agentreview-report.md \
+  --sarif-output agentreview.sarif.json
+```
+
+SARIF is an export format, not a replacement for PR comments/checks. Findings without file and line data are still included as SARIF results but do not have physical locations. GitHub Code Scanning upload behavior depends on repository and organization plan/settings.
 
 ## Review Routing And CODEOWNERS
 
@@ -167,7 +207,7 @@ GITHUB_TOKEN="${GITHUB_TOKEN}" agentreview request-reviewers \
 
 ## Reports And Artifacts
 
-The action writes the Markdown report to `output`, which defaults to `agentreview-report.md`. The same file is used for the PR comment when `comment: "true"`. When `request-reviewers: "true"` is enabled, the action also writes a temporary structured JSON analysis file for reviewer resolution.
+The action writes the Markdown report to `output`, which defaults to `agentreview-report.md`. The same file is used for the PR comment when `comment: "true"`. When `request-reviewers: "true"` is enabled, the action also writes a temporary structured JSON analysis file for reviewer resolution. When `sarif-output` is non-empty, the action writes SARIF to that path.
 
 To retain the report as a workflow artifact, add an upload step after the action. Use `if: always()` if you want the artifact even when `fail-on` fails the job.
 
@@ -231,7 +271,7 @@ jobs:
         run: git diff --unified=3 "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > agentreview.diff
 
       - name: Run AgentReviewOps
-        run: agentreview scan-diff --diff-file agentreview.diff --config .agentreview.yml --output agentreview-report.md --json-output agentreview-report.json --checks --repo "${{ github.repository }}" --head-sha "${{ github.event.pull_request.head.sha }}" --fail-on high --codeowners-file .github/CODEOWNERS
+        run: agentreview scan-diff --diff-file agentreview.diff --config .agentreview.yml --output agentreview-report.md --json-output agentreview-report.json --sarif-output agentreview.sarif.json --checks --repo "${{ github.repository }}" --head-sha "${{ github.event.pull_request.head.sha }}" --fail-on high --codeowners-file .github/CODEOWNERS
 
       - name: Request GitHub reviewers
         env:
