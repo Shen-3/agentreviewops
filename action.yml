@@ -30,6 +30,18 @@ inputs:
     description: "Which reviewers to request: users, teams, or users-and-teams."
     required: false
     default: users-and-teams
+  checks:
+    description: Publish an AgentReviewOps GitHub Check Run.
+    required: false
+    default: "false"
+  check-name:
+    description: Name of the GitHub Check Run.
+    required: false
+    default: AgentReviewOps
+  check-title:
+    description: Title shown in the GitHub Check output.
+    required: false
+    default: AgentReviewOps policy gate
   fail-on:
     description: Fail the job when risk is at or above this level. One of low, medium, high, block, never.
     required: false
@@ -142,16 +154,23 @@ runs:
         echo "repository=$repository" >> "$GITHUB_OUTPUT"
         echo "pr-number=$pr_number" >> "$GITHUB_OUTPUT"
         echo "pr-author=$PR_AUTHOR" >> "$GITHUB_OUTPUT"
+        echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
     - name: Run AgentReviewOps scan
       id: scan
       shell: bash
       env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        AGENTREVIEW_CHECK_NAME: ${{ inputs.check-name }}
+        AGENTREVIEW_CHECK_TITLE: ${{ inputs.check-title }}
+        AGENTREVIEW_CHECKS: ${{ inputs.checks }}
         AGENTREVIEW_DIFF_FILE: ${{ steps.prepare.outputs.diff-file }}
         AGENTREVIEW_CONFIG: ${{ inputs.config }}
         AGENTREVIEW_CODEOWNERS_FILE: ${{ inputs.codeowners-file }}
         AGENTREVIEW_FAIL_ON: ${{ inputs.fail-on }}
+        AGENTREVIEW_HEAD_SHA: ${{ steps.prepare.outputs.head-sha }}
         AGENTREVIEW_OUTPUT: ${{ inputs.output }}
+        AGENTREVIEW_REPOSITORY: ${{ steps.prepare.outputs.repository }}
         AGENTREVIEW_REQUEST_REVIEWERS: ${{ inputs.request-reviewers }}
       run: |
         set +e
@@ -162,6 +181,15 @@ runs:
           --fail-on "$AGENTREVIEW_FAIL_ON"
         )
         if [ -n "$AGENTREVIEW_CODEOWNERS_FILE" ]; then args+=(--codeowners-file "$AGENTREVIEW_CODEOWNERS_FILE"); fi
+        if [ "$AGENTREVIEW_CHECKS" = "true" ]; then
+          args+=(
+            --checks
+            --repo "$AGENTREVIEW_REPOSITORY"
+            --head-sha "$AGENTREVIEW_HEAD_SHA"
+            --check-name "$AGENTREVIEW_CHECK_NAME"
+            --check-title "$AGENTREVIEW_CHECK_TITLE"
+          )
+        fi
         analysis_file=""
         if [ "$AGENTREVIEW_REQUEST_REVIEWERS" = "true" ]; then
           analysis_file="${RUNNER_TEMP:-.}/agentreview-analysis.json"

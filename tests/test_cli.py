@@ -112,6 +112,68 @@ def test_scan_diff_writes_structured_json_output(tmp_path: Path) -> None:
     assert {"@alice", "@octo/security-team", "owner@example.com"} <= reviewer_identifiers
 
 
+def test_scan_diff_checks_requires_repo_and_head_sha(tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--output",
+            str(tmp_path / "report.md"),
+            "--checks",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--checks requires --repo, --head-sha" in result.output
+
+
+def test_scan_diff_can_publish_github_check(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    project_root = Path(__file__).parents[1]
+    output_path = tmp_path / "agentreview-report.md"
+    calls = []
+
+    def fake_create_check(**kwargs):
+        calls.append(kwargs)
+        return {"html_url": "https://github.com/octo/example/runs/1"}
+
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+    monkeypatch.setattr("agentreview.cli.create_or_update_check_run", fake_create_check)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-diff",
+            "--diff-file",
+            str(project_root / "examples" / "sample.diff"),
+            "--output",
+            str(output_path),
+            "--checks",
+            "--repo",
+            "octo/example",
+            "--head-sha",
+            "abc123",
+            "--fail-on",
+            "never",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "GitHub check: https://github.com/octo/example/runs/1" in result.output
+    assert calls[0]["repo"] == "octo/example"
+    assert calls[0]["head_sha"] == "abc123"
+    assert calls[0]["name"] == "AgentReviewOps"
+    assert calls[0]["title"] == "AgentReviewOps policy gate"
+    assert calls[0]["conclusion"] == "neutral"
+    assert calls[0]["token"] == "secret-token"
+    assert "secret-token" not in result.output
+
+
 def test_scan_diff_missing_config_uses_defaults(tmp_path: Path) -> None:
     runner = CliRunner()
     project_root = Path(__file__).parents[1]

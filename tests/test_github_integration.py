@@ -11,8 +11,10 @@ from agentreview.integrations.github import (
     AGENTREVIEW_COMMENT_MARKER,
     GITHUB_DIFF_ACCEPT,
     GITHUB_JSON_ACCEPT,
+    CheckRunAnnotation,
     GitHubIntegrationError,
     MissingGitHubTokenError,
+    create_or_update_check_run,
     fetch_pull_request_diff,
     request_pull_request_reviewers,
     upsert_pull_request_comment,
@@ -246,6 +248,88 @@ def test_request_pull_request_reviewers_http_error_does_not_include_token() -> N
         raise AssertionError("Expected GitHubIntegrationError")
 
 
+def test_create_or_update_check_run_posts_completed_check_payload() -> None:
+    calls = []
+
+    def fake_opener(request, timeout):
+        calls.append(
+            {
+                "url": request.full_url,
+                "method": request.get_method(),
+                "headers": dict(request.header_items()),
+                "body": request.data.decode("utf-8") if request.data else "",
+                "timeout": timeout,
+            }
+        )
+        return FakeResponse(json.dumps({"html_url": "https://github.com/octo/example/runs/1"}))
+
+    response = create_or_update_check_run(
+        repo="octo/example",
+        head_sha="abc123",
+        name="AgentReviewOps",
+        title="AgentReviewOps policy gate",
+        summary="1 changed file, high risk.",
+        text="Detailed findings.",
+        conclusion="failure",
+        annotations=[
+            CheckRunAnnotation(
+                path="auth/session.py",
+                start_line=12,
+                end_line=12,
+                annotation_level="failure",
+                message="A critical path changed.",
+                title="Critical path changed",
+                raw_details="Rule: critical-path-change",
+            )
+        ],
+        token="secret-token",
+        opener=fake_opener,
+    )
+
+    assert response["html_url"].endswith("/runs/1")
+    assert calls[0]["url"] == "https://api.github.com/repos/octo/example/check-runs"
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["headers"]["Accept"] == GITHUB_JSON_ACCEPT
+    assert calls[0]["headers"]["Authorization"] == "Bearer secret-token"
+    assert calls[0]["timeout"] == 30
+    payload = json.loads(calls[0]["body"])
+    assert payload["name"] == "AgentReviewOps"
+    assert payload["head_sha"] == "abc123"
+    assert payload["status"] == "completed"
+    assert payload["conclusion"] == "failure"
+    assert payload["output"]["title"] == "AgentReviewOps policy gate"
+    assert payload["output"]["summary"] == "1 changed file, high risk."
+    assert payload["output"]["text"] == "Detailed findings."
+    assert payload["output"]["annotations"] == [
+        {
+            "path": "auth/session.py",
+            "start_line": 12,
+            "end_line": 12,
+            "annotation_level": "failure",
+            "message": "A critical path changed.",
+            "title": "Critical path changed",
+            "raw_details": "Rule: critical-path-change",
+        }
+    ]
+
+
+def test_create_or_update_check_run_rejects_unsupported_conclusion() -> None:
+    try:
+        create_or_update_check_run(
+            repo="octo/example",
+            head_sha="abc123",
+            name="AgentReviewOps",
+            title="AgentReviewOps policy gate",
+            summary="summary",
+            conclusion="cancelled",
+            token="secret-token",
+        )
+    except GitHubIntegrationError as exc:
+        assert "success, neutral, or failure" in str(exc)
+    else:
+        raise AssertionError("Expected GitHubIntegrationError")
+
+
 def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Path) -> None:
     runner = CliRunner()
     output_path = tmp_path / "pr-report.md"
@@ -275,6 +359,28 @@ def test_scan_pr_writes_report_without_printing_token(monkeypatch, tmp_path: Pat
     payload = json.loads(json_output_path.read_text(encoding="utf-8"))
     assert payload["metadata"]["source"] == "scan-pr"
     assert payload["changed_files"][0]["path"] == "README.md"
+
+
+def test_scan_pr_checks_requires_head_sha(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+
+    result = runner.invoke(
+        app,
+        [
+            "scan-pr",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--output",
+            str(tmp_path / "report.md"),
+            "--checks",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--checks requires --head-sha" in result.output
 
 
 def test_scan_pr_fail_on_high_exits_after_writing_report(monkeypatch, tmp_path: Path) -> None:

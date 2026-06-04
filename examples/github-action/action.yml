@@ -59,7 +59,23 @@ inputs:
     required: false
     default: users-and-teams
   github-token:
-    description: GitHub token used when github-comment or request-reviewers is true. Prefer github.token or a GitHub secret.
+    description: GitHub token used when github-comment, checks, or request-reviewers is true. Prefer github.token or a GitHub secret.
+    required: false
+    default: ""
+  checks:
+    description: Publish an AgentReviewOps GitHub Check Run.
+    required: false
+    default: "false"
+  check-name:
+    description: Name of the GitHub Check Run.
+    required: false
+    default: AgentReviewOps
+  check-title:
+    description: Title shown in the GitHub Check output.
+    required: false
+    default: AgentReviewOps policy gate
+  head-sha:
+    description: Pull request head SHA used when checks is true.
     required: false
     default: ""
 
@@ -73,9 +89,15 @@ runs:
     - name: Run AgentReviewOps scan
       shell: bash
       env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        AGENTREVIEW_INPUT_CHECK_NAME: ${{ inputs.check-name }}
+        AGENTREVIEW_INPUT_CHECK_TITLE: ${{ inputs.check-title }}
+        AGENTREVIEW_INPUT_CHECKS: ${{ inputs.checks }}
         AGENTREVIEW_INPUT_CONFIG: ${{ inputs.config }}
         AGENTREVIEW_INPUT_DIFF_FILE: ${{ inputs.diff-file }}
+        AGENTREVIEW_INPUT_HEAD_SHA: ${{ inputs.head-sha }}
         AGENTREVIEW_INPUT_OUTPUT: ${{ inputs.output }}
+        AGENTREVIEW_INPUT_REPOSITORY: ${{ inputs.repository }}
         AGENTREVIEW_INPUT_REQUEST_REVIEWERS: ${{ inputs.request-reviewers }}
       run: |
         args=(
@@ -83,6 +105,15 @@ runs:
           --config "$AGENTREVIEW_INPUT_CONFIG"
           --output "$AGENTREVIEW_INPUT_OUTPUT"
         )
+        if [ "$AGENTREVIEW_INPUT_CHECKS" = "true" ]; then
+          args+=(
+            --checks
+            --repo "$AGENTREVIEW_INPUT_REPOSITORY"
+            --head-sha "$AGENTREVIEW_INPUT_HEAD_SHA"
+            --check-name "$AGENTREVIEW_INPUT_CHECK_NAME"
+            --check-title "$AGENTREVIEW_INPUT_CHECK_TITLE"
+          )
+        fi
         if [ "$AGENTREVIEW_INPUT_REQUEST_REVIEWERS" = "true" ]; then
           args+=(--json-output "${RUNNER_TEMP:-.}/agentreview-analysis.json")
         fi

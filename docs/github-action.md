@@ -8,6 +8,7 @@ The recommended GitHub Actions entrypoint is the root composite action:
     github-token: ${{ github.token }}
     config: .agentreview.yml
     comment: "true"
+    checks: "true"
     request-reviewers: "true"
     reviewer-request-mode: users-and-teams
     fail-on: high
@@ -31,6 +32,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  checks: write
 
 jobs:
   review-gate:
@@ -45,6 +47,7 @@ jobs:
           github-token: ${{ github.token }}
           config: .agentreview.yml
           comment: "true"
+          checks: "true"
           request-reviewers: "true"
           reviewer-request-mode: users-and-teams
           fail-on: high
@@ -63,6 +66,32 @@ When `diff-file` is omitted on `pull_request` or `pull_request_target` events, t
 - `block` fails CI only for `block` risk.
 
 The action still writes the report and runs configured comment/submission steps before the final CI failure is applied.
+
+## GitHub Check Runs
+
+Set `checks: "true"` to publish an AgentReviewOps GitHub Check Run. Checks are useful alongside PR comments when you want a branch protection rule to require the AgentReviewOps policy gate.
+
+```yaml
+- uses: Shen-3/agentreviewops@main
+  with:
+    github-token: ${{ github.token }}
+    comment: "true"
+    checks: "true"
+    check-name: AgentReviewOps
+    check-title: AgentReviewOps policy gate
+    fail-on: high
+```
+
+Workflows that publish check runs need:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+```
+
+The check conclusion is `failure` when the configured `fail-on` threshold is met, `neutral` when findings exist below the failure threshold, and `success` when there are no positive deterministic findings. GitHub annotations are emitted only for findings with file and line locations, and the first implementation caps annotations at 50. Findings without line locations remain visible in the check summary/text and Markdown report.
 
 ## Review Routing And CODEOWNERS
 
@@ -92,6 +121,7 @@ Reviewer requests are disabled by default. Set `request-reviewers: "true"` to ha
     github-token: ${{ github.token }}
     config: .agentreview.yml
     comment: "true"
+    checks: "true"
     request-reviewers: "true"
     reviewer-request-mode: users-and-teams
     fail-on: high
@@ -201,7 +231,7 @@ jobs:
         run: git diff --unified=3 "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > agentreview.diff
 
       - name: Run AgentReviewOps
-        run: agentreview scan-diff --diff-file agentreview.diff --config .agentreview.yml --output agentreview-report.md --json-output agentreview-report.json --fail-on high --codeowners-file .github/CODEOWNERS
+        run: agentreview scan-diff --diff-file agentreview.diff --config .agentreview.yml --output agentreview-report.md --json-output agentreview-report.json --checks --repo "${{ github.repository }}" --head-sha "${{ github.event.pull_request.head.sha }}" --fail-on high --codeowners-file .github/CODEOWNERS
 
       - name: Request GitHub reviewers
         env:

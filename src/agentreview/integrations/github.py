@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import json
 from typing import Any, Callable
@@ -11,6 +12,8 @@ GITHUB_DIFF_ACCEPT = "application/vnd.github.v3.diff"
 GITHUB_JSON_ACCEPT = "application/vnd.github+json"
 AGENTREVIEW_COMMENT_MARKER = "<!-- agentreviewops-report -->"
 USER_AGENT = "AgentReviewOps/0.1"
+SUPPORTED_CHECK_CONCLUSIONS = {"success", "neutral", "failure"}
+SUPPORTED_ANNOTATION_LEVELS = {"notice", "warning", "failure"}
 
 
 class GitHubIntegrationError(RuntimeError):
@@ -19,6 +22,31 @@ class GitHubIntegrationError(RuntimeError):
 
 class MissingGitHubTokenError(GitHubIntegrationError):
     """Raised when GITHUB_TOKEN is required but missing."""
+
+
+@dataclass(frozen=True)
+class CheckRunAnnotation:
+    path: str
+    start_line: int
+    end_line: int
+    annotation_level: str
+    message: str
+    title: str | None = None
+    raw_details: str | None = None
+
+    def to_payload(self) -> dict:
+        payload = {
+            "path": self.path,
+            "start_line": self.start_line,
+            "end_line": self.end_line,
+            "annotation_level": self.annotation_level,
+            "message": self.message,
+        }
+        if self.title is not None:
+            payload["title"] = self.title
+        if self.raw_details is not None:
+            payload["raw_details"] = self.raw_details
+        return payload
 
 
 def fetch_pull_request_diff(
@@ -151,6 +179,67 @@ def request_pull_request_reviewers(
     }
 
 
+def create_or_update_check_run(
+    *,
+    repo: str,
+    head_sha: str,
+    name: str,
+    title: str,
+    summary: str,
+    text: str | None = None,
+    conclusion: str,
+    annotations: list[CheckRunAnnotation] | None = None,
+    token: str | None = None,
+    api_base_url: str = GITHUB_API_BASE_URL,
+    opener: Callable[..., Any] | None = None,
+) -> dict:
+    active_token = token or os.environ.get("GITHUB_TOKEN")
+    _validate_check_run_inputs(
+        repo=repo,
+        head_sha=head_sha,
+        name=name,
+        title=title,
+        summary=summary,
+        conclusion=conclusion,
+        token=active_token,
+        annotations=annotations or [],
+    )
+    output = {
+        "title": title,
+        "summary": summary,
+    }
+    if text is not None:
+        output["text"] = text
+    if annotations:
+        output["annotations"] = [annotation.to_payload() for annotation in annotations]
+
+    request = _json_request(
+        f"{api_base_url.rstrip('/')}/repos/{repo}/check-runs",
+        token=active_token or "",
+        method="POST",
+        payload={
+            "name": name,
+            "head_sha": head_sha,
+            "status": "completed",
+            "conclusion": conclusion,
+            "output": output,
+        },
+    )
+    active_opener = opener or urlopen
+
+    try:
+        with active_opener(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise GitHubIntegrationError(_http_error_message(exc)) from exc
+    except (URLError, json.JSONDecodeError) as exc:
+        raise GitHubIntegrationError(f"GitHub API request failed: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise GitHubIntegrationError("GitHub check run response was not an object")
+    return payload
+
+
 def _find_existing_comment(
     *,
     repo: str,
@@ -206,10 +295,48 @@ def _validate_pull_request_inputs(*, repo: str, pr_number: int, token: str | Non
 
 
 def _validate_repository_and_pr(*, repo: str, pr_number: int) -> None:
-    if "/" not in repo or repo.count("/") != 1:
-        raise GitHubIntegrationError("Repository must use the owner/name format")
+    _validate_repository(repo)
     if pr_number <= 0:
         raise GitHubIntegrationError("Pull request number must be greater than zero")
+
+
+def _validate_check_run_inputs(
+    *,
+    repo: str,
+    head_sha: str,
+    name: str,
+    title: str,
+    summary: str,
+    conclusion: str,
+    token: str | None,
+    annotations: list[CheckRunAnnotation],
+) -> None:
+    _validate_repository(repo)
+    if not token:
+        raise MissingGitHubTokenError("GITHUB_TOKEN is required to create GitHub check runs")
+    if not head_sha.strip():
+        raise GitHubIntegrationError("Check run head SHA must not be empty")
+    if not name.strip():
+        raise GitHubIntegrationError("Check run name must not be empty")
+    if not title.strip():
+        raise GitHubIntegrationError("Check run title must not be empty")
+    if not summary.strip():
+        raise GitHubIntegrationError("Check run summary must not be empty")
+    if conclusion not in SUPPORTED_CHECK_CONCLUSIONS:
+        raise GitHubIntegrationError("Check run conclusion must be success, neutral, or failure")
+    for annotation in annotations:
+        if annotation.annotation_level not in SUPPORTED_ANNOTATION_LEVELS:
+            raise GitHubIntegrationError("Check annotation level must be notice, warning, or failure")
+        if annotation.start_line <= 0 or annotation.end_line <= 0:
+            raise GitHubIntegrationError("Check annotation line numbers must be greater than zero")
+
+
+def _validate_repository(repo: str) -> None:
+    if "/" not in repo or repo.count("/") != 1:
+        raise GitHubIntegrationError("Repository must use the owner/name format")
+    owner, name = repo.split("/", maxsplit=1)
+    if not owner.strip() or not name.strip():
+        raise GitHubIntegrationError("Repository must use the owner/name format")
 
 
 def _dedupe_case_insensitive(values: list[str]) -> list[str]:

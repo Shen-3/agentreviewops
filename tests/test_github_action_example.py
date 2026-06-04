@@ -38,6 +38,9 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert action["inputs"]["comment"]["default"] == "true"
     assert action["inputs"]["request-reviewers"]["default"] == "false"
     assert action["inputs"]["reviewer-request-mode"]["default"] == "users-and-teams"
+    assert action["inputs"]["checks"]["default"] == "false"
+    assert action["inputs"]["check-name"]["default"] == "AgentReviewOps"
+    assert action["inputs"]["check-title"]["default"] == "AgentReviewOps policy gate"
     assert action["inputs"]["fail-on"]["default"] == "never"
     assert action["inputs"]["codeowners-file"]["default"] == ""
     assert "diff-file" in action["inputs"]
@@ -48,6 +51,9 @@ def test_root_composite_action_yaml_is_valid() -> None:
     assert "git diff --no-ext-diff" in steps
     assert "agentreview scan-diff" in steps
     assert "--json-output" in steps
+    assert "--checks" in steps
+    assert "--head-sha" in steps
+    assert "--check-name" in steps
     assert "agentreview request-reviewers" in steps
     assert "--reviewer-request-mode" in steps
     assert "--fail-on" in steps

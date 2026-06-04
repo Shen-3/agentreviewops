@@ -12,6 +12,7 @@ from agentreview import __version__
 from agentreview.ai import AIProviderConfigError, AIProviderRequestError
 from agentreview.analysis_output import write_analysis_json_output
 from agentreview.analysis import analyze_diff_text
+from agentreview.checks import analysis_to_check_run_content
 from agentreview.config import ConfigError, DEFAULT_CONFIG_PATH, load_config
 from agentreview.github_reviewers import (
     GitHubReviewerRequestPlan,
@@ -22,6 +23,7 @@ from agentreview.integrations.github import (
     GITHUB_API_BASE_URL,
     GitHubIntegrationError,
     MissingGitHubTokenError,
+    create_or_update_check_run,
     fetch_pull_request_diff,
     request_pull_request_reviewers,
     upsert_pull_request_comment,
@@ -183,6 +185,36 @@ def scan_diff(
         resolve_path=True,
         help="Optional CODEOWNERS file for human review routing. Defaults to standard CODEOWNERS paths.",
     ),
+    repo: str | None = typer.Option(
+        None,
+        "--repo",
+        help="GitHub repository in owner/name format. Required when --checks is enabled.",
+    ),
+    head_sha: str | None = typer.Option(
+        None,
+        "--head-sha",
+        help="Pull request head SHA. Required when --checks is enabled.",
+    ),
+    checks: bool = typer.Option(
+        False,
+        "--checks",
+        help="Publish an AgentReviewOps GitHub Check Run.",
+    ),
+    check_name: str = typer.Option(
+        "AgentReviewOps",
+        "--check-name",
+        help="Name of the GitHub Check Run.",
+    ),
+    check_title: str = typer.Option(
+        "AgentReviewOps policy gate",
+        "--check-title",
+        help="Title shown in the GitHub Check output.",
+    ),
+    api_base_url: str = typer.Option(
+        GITHUB_API_BASE_URL,
+        "--api-base-url",
+        help="GitHub API base URL, for example a GitHub Enterprise API URL.",
+    ),
     json_output: Path | None = typer.Option(
         None,
         "--json-output",
@@ -191,6 +223,7 @@ def scan_diff(
     ),
 ) -> None:
     """Analyze a unified diff and write a Markdown review report."""
+    _validate_checks_context(checks=checks, repo=repo, head_sha=head_sha)
     try:
         config = load_config(config_path)
         codeowners_text = _load_codeowners_for_cli(codeowners_file, config.review_routing.codeowners.path)
@@ -222,6 +255,16 @@ def scan_diff(
         typer.echo(f"Could not write report to {output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     _write_json_output_for_cli(json_output, result, fail_on=fail_on.value, source="scan-diff")
+    check_url = _publish_check_run_for_cli(
+        checks=checks,
+        result=result,
+        repo=repo,
+        head_sha=head_sha,
+        fail_on=fail_on.value,
+        check_name=check_name,
+        check_title=check_title,
+        api_base_url=api_base_url,
+    )
 
     typer.echo("AgentReviewOps")
     typer.echo(f"Risk: {result.analysis.risk_level.upper()} {result.analysis.risk_score}/100")
@@ -236,6 +279,8 @@ def scan_diff(
         typer.echo("- INFO none: no positive risk findings")
     typer.echo("")
     typer.echo(f"Report written to: {output}")
+    if check_url is not None:
+        typer.echo(f"GitHub check: {check_url}")
     _enforce_fail_on(result.analysis.risk_level, result.analysis.risk_score, fail_on)
 
 
@@ -378,6 +423,31 @@ def scan_pr(
         resolve_path=True,
         help="Optional CODEOWNERS file for human review routing. Defaults to standard CODEOWNERS paths.",
     ),
+    head_sha: str | None = typer.Option(
+        None,
+        "--head-sha",
+        help="Pull request head SHA. Required when --checks is enabled.",
+    ),
+    checks: bool = typer.Option(
+        False,
+        "--checks",
+        help="Publish an AgentReviewOps GitHub Check Run.",
+    ),
+    check_name: str = typer.Option(
+        "AgentReviewOps",
+        "--check-name",
+        help="Name of the GitHub Check Run.",
+    ),
+    check_title: str = typer.Option(
+        "AgentReviewOps policy gate",
+        "--check-title",
+        help="Title shown in the GitHub Check output.",
+    ),
+    api_base_url: str = typer.Option(
+        GITHUB_API_BASE_URL,
+        "--api-base-url",
+        help="GitHub API base URL, for example a GitHub Enterprise API URL.",
+    ),
     comment: bool = typer.Option(
         False,
         "--comment/--no-comment",
@@ -391,10 +461,16 @@ def scan_pr(
     ),
 ) -> None:
     """Fetch a GitHub pull request diff and write a Markdown review report."""
+    _validate_checks_context(checks=checks, repo=repo, head_sha=head_sha)
     try:
         config = load_config(config_path)
         codeowners_text = _load_codeowners_for_cli(codeowners_file, config.review_routing.codeowners.path)
-        diff_text = fetch_pull_request_diff(repo=repo, pr_number=pr_number, token=os.environ.get("GITHUB_TOKEN"))
+        diff_text = fetch_pull_request_diff(
+            repo=repo,
+            pr_number=pr_number,
+            token=os.environ.get("GITHUB_TOKEN"),
+            api_base_url=api_base_url,
+        )
         result = analyze_diff_text(diff_text, config=config, codeowners_text=codeowners_text)
     except ConfigError as exc:
         typer.echo(f"Config error: {exc}", err=True)
@@ -422,6 +498,16 @@ def scan_pr(
         typer.echo(f"Could not write report to {output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     _write_json_output_for_cli(json_output, result, fail_on=fail_on.value, source="scan-pr")
+    check_url = _publish_check_run_for_cli(
+        checks=checks,
+        result=result,
+        repo=repo,
+        head_sha=head_sha,
+        fail_on=fail_on.value,
+        check_name=check_name,
+        check_title=check_title,
+        api_base_url=api_base_url,
+    )
 
     typer.echo("AgentReviewOps")
     typer.echo(f"GitHub PR: {repo}#{pr_number}")
@@ -434,6 +520,7 @@ def scan_pr(
                 pr_number=pr_number,
                 body=result.markdown,
                 token=os.environ.get("GITHUB_TOKEN"),
+                api_base_url=api_base_url,
             )
         except MissingGitHubTokenError as exc:
             typer.echo(str(exc), err=True)
@@ -442,6 +529,8 @@ def scan_pr(
             typer.echo(f"GitHub error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
         typer.echo(f"GitHub comment: {comment_url}")
+    if check_url is not None:
+        typer.echo(f"GitHub check: {check_url}")
     _enforce_fail_on(result.analysis.risk_level, result.analysis.risk_score, fail_on)
 
 
@@ -614,6 +703,60 @@ def _write_json_output_for_cli(
     except OSError as exc:
         typer.echo(f"Could not write JSON analysis output to {json_output}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+
+def _validate_checks_context(*, checks: bool, repo: str | None, head_sha: str | None) -> None:
+    if not checks:
+        return
+    missing = []
+    if not repo:
+        missing.append("--repo")
+    if not head_sha:
+        missing.append("--head-sha")
+    if missing:
+        typer.echo(f"--checks requires {', '.join(missing)}.", err=True)
+        raise typer.Exit(code=2)
+
+
+def _publish_check_run_for_cli(
+    *,
+    checks: bool,
+    result,
+    repo: str | None,
+    head_sha: str | None,
+    fail_on: str,
+    check_name: str,
+    check_title: str,
+    api_base_url: str,
+) -> str | None:
+    if not checks:
+        return None
+    check_content = analysis_to_check_run_content(result, fail_on=fail_on)
+    try:
+        response = create_or_update_check_run(
+            repo=repo or "",
+            head_sha=head_sha or "",
+            name=check_name,
+            title=check_title,
+            summary=check_content.summary,
+            text=check_content.text,
+            conclusion=check_content.conclusion,
+            annotations=check_content.annotations,
+            token=os.environ.get("GITHUB_TOKEN"),
+            api_base_url=api_base_url,
+        )
+    except MissingGitHubTokenError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except GitHubIntegrationError as exc:
+        typer.echo(f"GitHub error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    for key in ("html_url", "details_url", "url"):
+        value = response.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return "created"
 
 
 def _load_review_requirements_from_analysis_file(analysis_file: Path) -> list[ReviewRequirement]:
