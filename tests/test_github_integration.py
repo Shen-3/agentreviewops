@@ -20,7 +20,6 @@ from agentreview.integrations.github import (
     upsert_pull_request_comment,
 )
 
-
 SAMPLE_DIFF = """diff --git a/README.md b/README.md
 index 1111111..2222222 100644
 --- a/README.md

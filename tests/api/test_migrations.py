@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 
+from alembic import command
 
 PROJECT_ROOT = Path(__file__).parents[2]
 

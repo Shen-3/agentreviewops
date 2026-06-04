@@ -37,6 +37,8 @@ dependencies = [
 dev = [
   "playwright>=1.60,<2",
   "pytest>=8,<9",
+  "pytest-cov>=7,<8",
+  "ruff>=0.14,<1",
 ]
 
 [project.scripts]
@@ -45,6 +47,25 @@ agentreview = "agentreview.cli:app"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["src", "apps/api", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+# B008 conflicts with FastAPI/Typer dependency declaration patterns.
+# UP017 would create broad datetime churn outside the current quality-gate scope.
+ignore = ["B008", "UP017"]
+
+[tool.coverage.run]
+branch = true
+source = ["agentreview", "agentreview_api"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentreview", "apps/api/agentreview_api"]

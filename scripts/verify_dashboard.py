@@ -1,8 +1,8 @@
 from __future__ import annotations
+
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_URL = "http://127.0.0.1:5173"

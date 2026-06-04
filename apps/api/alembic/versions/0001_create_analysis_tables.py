@@ -4,10 +4,12 @@ Revision ID: 0001_create_analysis_tables
 Revises:
 Create Date: 2026-05-23
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0001_create_analysis_tables"
 down_revision = None
@@ -36,7 +38,12 @@ def upgrade() -> None:
     op.create_table(
         "changed_files",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("analysis_run_id", sa.String(length=36), sa.ForeignKey("analysis_runs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "analysis_run_id",
+            sa.String(length=36),
+            sa.ForeignKey("analysis_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("path", sa.Text(), nullable=False),
         sa.Column("previous_path", sa.Text(), nullable=True),
         sa.Column("status", sa.String(length=20), nullable=False),
@@ -49,7 +56,12 @@ def upgrade() -> None:
     op.create_table(
         "risk_findings",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("analysis_run_id", sa.String(length=36), sa.ForeignKey("analysis_runs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "analysis_run_id",
+            sa.String(length=36),
+            sa.ForeignKey("analysis_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("rule_id", sa.String(length=100), nullable=False),
         sa.Column("severity", sa.String(length=20), nullable=False),
         sa.Column("title", sa.Text(), nullable=False),

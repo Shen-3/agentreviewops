@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).parents[1]
 WEB_ROOT = PROJECT_ROOT / "apps" / "web"
 WEB_SRC = WEB_ROOT / "src"

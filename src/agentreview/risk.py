@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
-import re
 
 from agentreview.models import AddedDiffLine, AgentReviewConfig, DiffFile, RiskAnalysis, RiskFinding, RiskLevel
 
@@ -161,7 +161,11 @@ def _add_file_findings(
                 )
             )
 
-        if config.rules.flag_large_generated_files and changed_file.status == "added" and _matches_any(paths, GENERATED_PATTERNS):
+        if (
+            config.rules.flag_large_generated_files
+            and changed_file.status == "added"
+            and _matches_any(paths, GENERATED_PATTERNS)
+        ):
             findings.append(
                 RiskFinding(
                     rule_id="generated-file-added",
@@ -222,7 +226,9 @@ def _add_github_actions_findings(changed_file: DiffFile, findings: list[RiskFind
                     rule_id="github-actions-pull-request-target",
                     severity="high",
                     title="GitHub Actions workflow uses pull_request_target",
-                    description="pull_request_target runs with elevated repository context and requires careful review.",
+                    description=(
+                        "pull_request_target runs with elevated repository context and requires careful review."
+                    ),
                     score_delta=20,
                     file_path=changed_file.path,
                     added_line=added_line,

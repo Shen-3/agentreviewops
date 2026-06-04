@@ -4,10 +4,12 @@ Revision ID: 0005_add_repository_scoped_policies
 Revises: 0004_add_audit_events
 Create Date: 2026-06-01
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0005_add_repository_scoped_policies"
 down_revision = "0004_add_audit_events"

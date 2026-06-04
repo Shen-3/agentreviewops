@@ -34,10 +34,7 @@ def build_analysis_json_payload(
         "summary": build_analysis_summary(result),
         "findings": [finding.model_dump(mode="json") for finding in result.analysis.findings],
         "changed_files": [changed_file.model_dump(mode="json") for changed_file in result.changed_files],
-        "review_requirements": [
-            requirement.model_dump(mode="json")
-            for requirement in result.review_requirements
-        ],
+        "review_requirements": [requirement.model_dump(mode="json") for requirement in result.review_requirements],
         "metadata": {
             "generated_at": _format_timestamp(generated_at or datetime.now(timezone.utc)),
             "agentreview_version": __version__,

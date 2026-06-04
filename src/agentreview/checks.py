@@ -35,11 +35,13 @@ def analysis_to_check_run_content(
     ]
     if missing_location_count:
         summary_lines.append(
-            f"{missing_location_count} finding(s) were omitted from check annotations because no file/line location was available."
+            f"{missing_location_count} finding(s) were omitted from check annotations because no file/line "
+            "location was available."
         )
     if capped_count:
         summary_lines.append(
-            f"{capped_count} finding(s) were omitted from check annotations because the annotation output is capped at {annotation_limit}."
+            f"{capped_count} finding(s) were omitted from check annotations because the annotation output is capped "
+            f"at {annotation_limit}."
         )
     return CheckRunContent(
         conclusion=_check_conclusion(result, fail_on=fail_on, positive_findings=positive_findings),

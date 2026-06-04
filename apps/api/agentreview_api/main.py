@@ -38,6 +38,8 @@ from agentreview_api.audit import (
 from agentreview_api.auth import AuthContext, require_admin_api_key, require_analysis_api_key, require_api_key
 from agentreview_api.db import PolicyRecord, RepositoryRecord, get_session
 from agentreview_api.repository import (
+    count_admin_users,
+    count_retention_candidates,
     create_analysis_run,
     create_api_key,
     create_audit_event,
@@ -45,10 +47,8 @@ from agentreview_api.repository import (
     create_repository,
     create_repository_membership,
     create_user,
-    count_retention_candidates,
-    count_admin_users,
-    delete_repository_membership,
     delete_repository,
+    delete_repository_membership,
     delete_user,
     get_analysis_run,
     get_api_key,
@@ -319,7 +319,9 @@ def auth_me(auth: AuthContext = Depends(require_api_key)) -> AuthMeResponse:
 
 
 @app.get("/api/repositories", response_model=list[RepositoryResponse])
-def get_repositories(auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)) -> list[RepositoryResponse]:
+def get_repositories(
+    auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)
+) -> list[RepositoryResponse]:
     return [_repository_response(record) for record in list_repositories(session, organization_id=auth.organization_id)]
 
 
@@ -332,7 +334,9 @@ def create_org_repository(
     provider = request.provider.strip().lower()
     owner = request.owner.strip()
     name = request.name.strip()
-    default_branch = request.default_branch.strip() if request.default_branch and request.default_branch.strip() else None
+    default_branch = (
+        request.default_branch.strip() if request.default_branch and request.default_branch.strip() else None
+    )
     visibility = request.visibility.strip().lower() if request.visibility and request.visibility.strip() else None
     if not provider or not owner or not name:
         raise HTTPException(status_code=422, detail="Repository provider, owner, and name are required")
@@ -531,7 +535,9 @@ def update_repository_membership_role(
 
 
 @app.get("/api/users", response_model=list[UserResponse])
-def get_users(auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)) -> list[UserResponse]:
+def get_users(
+    auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)
+) -> list[UserResponse]:
     return [_user_response(record) for record in list_users(session, organization_id=auth.organization_id)]
 
 
@@ -584,7 +590,11 @@ def update_org_user(
     record = get_user(session, organization_id=auth.organization_id, user_id=user_id)
     if record is None:
         raise HTTPException(status_code=404, detail="User not found")
-    if request.role == "reviewer" and record.role == "admin" and count_admin_users(session, organization_id=auth.organization_id) <= 1:
+    if (
+        request.role == "reviewer"
+        and record.role == "admin"
+        and count_admin_users(session, organization_id=auth.organization_id) <= 1
+    ):
         raise HTTPException(status_code=400, detail="Cannot demote the last organization admin")
 
     previous_role = record.role
@@ -636,8 +646,12 @@ def delete_org_user(
 
 
 @app.get("/api/api-keys", response_model=list[ApiKeyResponse])
-def get_api_keys(auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)) -> list[ApiKeyResponse]:
-    return [_api_key_response(record, auth=auth) for record in list_api_keys(session, organization_id=auth.organization_id)]
+def get_api_keys(
+    auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)
+) -> list[ApiKeyResponse]:
+    return [
+        _api_key_response(record, auth=auth) for record in list_api_keys(session, organization_id=auth.organization_id)
+    ]
 
 
 @app.post("/api/api-keys", response_model=ApiKeyCreateResponse)
@@ -894,7 +908,9 @@ def purge_retention(
 
 
 @app.get("/api/policies", response_model=list[PolicyResponse])
-def get_policies(auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)) -> list[PolicyResponse]:
+def get_policies(
+    auth: AuthContext = Depends(require_api_key), session: Session = Depends(get_session)
+) -> list[PolicyResponse]:
     return [_policy_response(record) for record in list_policies(session, organization_id=auth.organization_id)]
 
 
@@ -980,7 +996,9 @@ def update_saved_policy(
                 "enabled": updated.enabled,
                 "previous_enabled": previous_enabled,
                 "scope": updated.scope,
-                "repository": f"{updated.repository.owner}/{updated.repository.name}" if updated.repository is not None else None,
+                "repository": f"{updated.repository.owner}/{updated.repository.name}"
+                if updated.repository is not None
+                else None,
             }
         ),
     )
@@ -1050,7 +1068,9 @@ def analyze_diff(
             "policy_id": policy_selection.policy.id if policy_selection.policy is not None else None,
             "policy_name": policy_selection.policy.name if policy_selection.policy is not None else None,
             "repository_id": policy_selection.repository.id if policy_selection.repository is not None else None,
-            "routed_reviewer_count": len(policy_selection.repository.memberships) if policy_selection.repository is not None else 0,
+            "routed_reviewer_count": len(policy_selection.repository.memberships)
+            if policy_selection.repository is not None
+            else 0,
             "routed_reviewer_roles": sorted({membership.role for membership in policy_selection.repository.memberships})
             if policy_selection.repository is not None
             else [],
@@ -1150,22 +1170,12 @@ def _unconfigured_review_requirement_count(review_requirements: list[ReviewRequi
 
 def _reviewer_sources(review_requirements: list[ReviewRequirement]) -> list[str]:
     return sorted(
-        {
-            reviewer.source
-            for requirement in review_requirements
-            for reviewer in requirement.suggested_reviewers
-        }
+        {reviewer.source for requirement in review_requirements for reviewer in requirement.suggested_reviewers}
     )
 
 
 def _required_roles(review_requirements: list[ReviewRequirement]) -> list[str]:
-    return sorted(
-        {
-            role
-            for requirement in review_requirements
-            for role in requirement.required_roles
-        }
-    )
+    return sorted({role for requirement in review_requirements for role in requirement.required_roles})
 
 
 def _resolve_analysis_config(
@@ -1203,7 +1213,9 @@ def _resolve_analysis_config(
     return PolicySelection(config=AgentReviewConfig(), source="default", policy=None, repository=repository)
 
 
-def _find_repository_for_analysis(repository_name: str | None, auth: AuthContext, session: Session) -> RepositoryRecord | None:
+def _find_repository_for_analysis(
+    repository_name: str | None, auth: AuthContext, session: Session
+) -> RepositoryRecord | None:
     identity = _parse_repository_identity(repository_name)
     if identity is None:
         return None
@@ -1251,7 +1263,9 @@ def _policy_response(record) -> PolicyResponse:
         name=record.name,
         scope=record.scope,
         repository_id=record.repository_id,
-        repository_full_name=f"{record.repository.owner}/{record.repository.name}" if record.repository is not None else None,
+        repository_full_name=f"{record.repository.owner}/{record.repository.name}"
+        if record.repository is not None
+        else None,
         enabled=record.enabled,
         config=AgentReviewConfig.model_validate(record.config_json),
         created_at=record.created_at,

@@ -5,7 +5,6 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -21,6 +20,7 @@ from agentreview_api.repository import (
     create_repository_membership,
     create_user,
 )
+from alembic import command
 
 PROJECT_ROOT = Path(__file__).parents[2]
 
@@ -292,7 +292,9 @@ def test_user_management_and_repository_membership_assignment(client: TestClient
         f"/api/repositories/{repository['repository_id']}/memberships/{created_user['user_id']}",
     )
     assert remove_membership_response.status_code == 200
-    reviewer_emails = {reviewer["email"]: reviewer["role"] for reviewer in remove_membership_response.json()["reviewers"]}
+    reviewer_emails = {
+        reviewer["email"]: reviewer["role"] for reviewer in remove_membership_response.json()["reviewers"]
+    }
     assert "payments.owner@example.com" not in reviewer_emails
 
     delete_user_response = client.delete(f"/api/users/{created_user['user_id']}")
@@ -514,7 +516,9 @@ def test_role_update_endpoints_audit_and_protect_admins(client: TestClient) -> N
         json={"role": "read_only"},
     )
     assert demote_current_key_response.status_code == 400
-    assert demote_current_key_response.json() == {"detail": "Cannot change the current admin API key to a non-admin role"}
+    assert demote_current_key_response.json() == {
+        "detail": "Cannot change the current admin API key to a non-admin role"
+    }
 
     repository = client.get("/api/repositories").json()[0]
     assign_response = client.post(
@@ -531,7 +535,9 @@ def test_role_update_endpoints_audit_and_protect_admins(client: TestClient) -> N
         json={"role": "owner"},
     )
     assert update_membership_response.status_code == 200
-    reviewer_roles = {reviewer["email"]: reviewer["role"] for reviewer in update_membership_response.json()["reviewers"]}
+    reviewer_roles = {
+        reviewer["email"]: reviewer["role"] for reviewer in update_membership_response.json()["reviewers"]
+    }
     assert reviewer_roles["role-editor@example.com"] == "owner"
 
     actions = [event["action"] for event in client.get("/api/audit-events").json()]

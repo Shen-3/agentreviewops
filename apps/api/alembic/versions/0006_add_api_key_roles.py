@@ -4,10 +4,12 @@ Revision ID: 0006_add_api_key_roles
 Revises: 0005_add_repository_scoped_policies
 Create Date: 2026-06-01
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0006_add_api_key_roles"
 down_revision = "0005_add_repository_scoped_policies"

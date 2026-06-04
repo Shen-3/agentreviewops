@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import json
-from enum import Enum
-from pathlib import Path
 import os
+from enum import StrEnum
+from pathlib import Path
 
 import httpx
 import typer
 
 from agentreview import __version__
 from agentreview.ai import AIProviderConfigError, AIProviderRequestError
-from agentreview.analysis_output import write_analysis_json_output
 from agentreview.analysis import analyze_diff_text
+from agentreview.analysis_output import write_analysis_json_output
 from agentreview.checks import analysis_to_check_run_content
-from agentreview.config import ConfigError, DEFAULT_CONFIG_PATH, load_config
+from agentreview.config import DEFAULT_CONFIG_PATH, ConfigError, load_config
 from agentreview.github_reviewers import (
     GitHubReviewerRequestPlan,
     filter_github_reviewer_request_plan,
@@ -42,7 +42,7 @@ admin_app = typer.Typer(help="Administrative commands for self-hosted AgentRevie
 app.add_typer(admin_app, name="admin")
 
 
-class FailOnLevel(str, Enum):
+class FailOnLevel(StrEnum):
     NEVER = "never"
     LOW = "low"
     MEDIUM = "medium"
@@ -50,7 +50,7 @@ class FailOnLevel(str, Enum):
     BLOCK = "block"
 
 
-class ReviewerRequestMode(str, Enum):
+class ReviewerRequestMode(StrEnum):
     USERS = "users"
     TEAMS = "teams"
     USERS_AND_TEAMS = "users-and-teams"
@@ -307,7 +307,10 @@ def submit_diff(
     config_path: Path = typer.Option(
         Path(DEFAULT_CONFIG_PATH),
         "--config",
-        help="Path to .agentreview.yml. Missing files use built-in defaults unless an organization policy overrides them.",
+        help=(
+            "Path to .agentreview.yml. Missing files use built-in defaults unless an organization policy "
+            "overrides them."
+        ),
     ),
     api_url: str = typer.Option(
         "http://127.0.0.1:8000",
@@ -327,7 +330,9 @@ def submit_diff(
     author: str | None = typer.Option(None, "--author", help="Pull request author or agent account."),
     agent_name: str | None = typer.Option(None, "--agent-name", help="Detected or supplied AI agent name."),
     branch: str | None = typer.Option(None, "--branch", help="Source branch name."),
-    timeout_seconds: float = typer.Option(15.0, "--timeout", min=1.0, max=120.0, help="API request timeout in seconds."),
+    timeout_seconds: float = typer.Option(
+        15.0, "--timeout", min=1.0, max=120.0, help="API request timeout in seconds."
+    ),
 ) -> None:
     """Submit a unified diff to the self-hosted API and persist the analysis run."""
     if not api_key:
@@ -806,10 +811,7 @@ def _load_review_requirements_from_analysis_file(analysis_file: Path) -> list[Re
         typer.echo(f"Analysis file {analysis_file} is missing review_requirements.", err=True)
         raise typer.Exit(code=2)
     try:
-        return [
-            ReviewRequirement.model_validate(requirement)
-            for requirement in review_requirements_json
-        ]
+        return [ReviewRequirement.model_validate(requirement) for requirement in review_requirements_json]
     except ValueError as exc:
         typer.echo(f"Analysis file {analysis_file} has invalid review_requirements: {exc}", err=True)
         raise typer.Exit(code=2) from exc
@@ -821,10 +823,7 @@ def _echo_reviewer_request_summary(plan: GitHubReviewerRequestPlan, *, api_call_
     typer.echo("Skipped reviewers:")
     if plan.skipped:
         for skipped_reviewer in plan.skipped:
-            typer.echo(
-                f"- {skipped_reviewer.identifier}: "
-                f"{skipped_reviewer.reason} ({skipped_reviewer.source})"
-            )
+            typer.echo(f"- {skipped_reviewer.identifier}: {skipped_reviewer.reason} ({skipped_reviewer.source})")
     else:
         typer.echo("- none")
     typer.echo(f"GitHub API call: {api_call_status}")
@@ -841,10 +840,7 @@ def _enforce_fail_on(risk_level: str, risk_score: int, fail_on: FailOnLevel) -> 
         return
 
     typer.echo(
-        (
-            "CI gate failed: "
-            f"risk {risk_level.upper()} ({risk_score}/100) meets --fail-on {fail_on.value} threshold."
-        ),
+        (f"CI gate failed: risk {risk_level.upper()} ({risk_score}/100) meets --fail-on {fail_on.value} threshold."),
         err=True,
     )
     raise typer.Exit(code=1)

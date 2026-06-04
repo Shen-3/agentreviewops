@@ -152,11 +152,7 @@ def _repository_reviewers_for_roles(reviewers: list[SuggestedReviewer], roles: l
     if not roles:
         return []
     role_set = set(roles)
-    return [
-        reviewer
-        for reviewer in reviewers
-        if reviewer.role in role_set
-    ]
+    return [reviewer for reviewer in reviewers if reviewer.role in role_set]
 
 
 def _dedupe_reviewers(reviewers: list[SuggestedReviewer]) -> list[SuggestedReviewer]:

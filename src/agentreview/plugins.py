@@ -66,14 +66,22 @@ def _entry_point_plugins(entry_point_group: str) -> list[AnalyzerPlugin]:
     elif isinstance(discovered, dict):
         selected = discovered.get(entry_point_group, [])
     else:
-        selected = [entry_point for entry_point in discovered if getattr(entry_point, "group", entry_point_group) == entry_point_group]
+        selected = [
+            entry_point
+            for entry_point in discovered
+            if getattr(entry_point, "group", entry_point_group) == entry_point_group
+        ]
 
     plugins: list[AnalyzerPlugin] = []
     for entry_point in selected:
         try:
-            plugins.append(_materialize_plugin(entry_point.load(), source=getattr(entry_point, "name", entry_point_group)))
+            plugins.append(
+                _materialize_plugin(entry_point.load(), source=getattr(entry_point, "name", entry_point_group))
+            )
         except Exception as exc:
-            raise PluginError(f"Could not load analyzer plugin {getattr(entry_point, 'name', entry_point_group)}: {exc}") from exc
+            raise PluginError(
+                f"Could not load analyzer plugin {getattr(entry_point, 'name', entry_point_group)}: {exc}"
+            ) from exc
     return plugins
 
 
@@ -95,7 +103,9 @@ def _validate_plugin_shape(plugin, *, source: str) -> None:
         raise PluginError(f"Analyzer plugin {source} must define a non-empty string id")
     if not isinstance(plugin_name, str) or not plugin_name.strip():
         raise PluginError(f"Analyzer plugin {plugin_id} must define a non-empty string name")
-    if not isinstance(permissions, list) or any(not isinstance(permission, str) or not permission.strip() for permission in permissions):
+    if not isinstance(permissions, list) or any(
+        not isinstance(permission, str) or not permission.strip() for permission in permissions
+    ):
         raise PluginError(f"Analyzer plugin {plugin_id} must define permissions as a list of non-empty strings")
     if not callable(analyze):
         raise PluginError(f"Analyzer plugin {plugin_id} must define an analyze method")

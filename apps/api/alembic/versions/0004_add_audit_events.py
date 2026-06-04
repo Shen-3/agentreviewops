@@ -4,10 +4,12 @@ Revision ID: 0004_add_audit_events
 Revises: 0003_add_policies
 Create Date: 2026-05-24
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0004_add_audit_events"
 down_revision = "0003_add_policies"
@@ -19,7 +21,12 @@ def upgrade() -> None:
     op.create_table(
         "audit_events",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("organization_id", sa.String(length=36), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "organization_id",
+            sa.String(length=36),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("actor_type", sa.String(length=50), nullable=False),
         sa.Column("actor_id", sa.String(length=255), nullable=True),
         sa.Column("action", sa.String(length=100), nullable=False),
@@ -31,8 +38,12 @@ def upgrade() -> None:
     op.create_index("ix_audit_events_organization_id", "audit_events", ["organization_id"])
     op.create_index("ix_audit_events_org_created_at", "audit_events", ["organization_id", "created_at"])
     op.create_index("ix_audit_events_org_action", "audit_events", ["organization_id", "action"])
-    op.create_index("ix_audit_events_org_target", "audit_events", ["organization_id", "target_type", "target_id", "created_at"])
-    op.create_index("ix_audit_events_org_actor", "audit_events", ["organization_id", "actor_type", "actor_id", "created_at"])
+    op.create_index(
+        "ix_audit_events_org_target", "audit_events", ["organization_id", "target_type", "target_id", "created_at"]
+    )
+    op.create_index(
+        "ix_audit_events_org_actor", "audit_events", ["organization_id", "actor_type", "actor_id", "created_at"]
+    )
 
 
 def downgrade() -> None:

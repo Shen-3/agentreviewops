@@ -41,9 +41,7 @@ def test_resolve_github_reviewer_request_plan_excludes_pull_request_author() -> 
     plan = resolve_github_reviewer_request_plan([requirement], author="Alice")
 
     assert plan.reviewers == ["bob"]
-    assert [(item.identifier, item.reason) for item in plan.skipped] == [
-        ("@alice", "pull_request_author")
-    ]
+    assert [(item.identifier, item.reason) for item in plan.skipped] == [("@alice", "pull_request_author")]
 
 
 def test_filter_github_reviewer_request_plan_honors_request_mode() -> None:

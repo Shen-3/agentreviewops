@@ -112,7 +112,10 @@ def test_check_run_caps_annotations_and_notes_omissions() -> None:
 
     assert len(content.annotations) == 2
     assert all(annotation.annotation_level == "notice" for annotation in content.annotations)
-    assert "2 finding(s) were omitted from check annotations because the annotation output is capped at 2" in content.summary
+    assert (
+        "2 finding(s) were omitted from check annotations because the annotation output is capped at 2"
+        in content.summary
+    )
 
 
 def _analysis_result(

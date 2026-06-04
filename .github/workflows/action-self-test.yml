@@ -41,5 +41,25 @@ jobs:
           test -s agentreview-self-test-report.md
           test -s agentreview-self-test-report.json
           test -s agentreview-self-test.sarif.json
-          python -m json.tool agentreview-self-test-report.json >/dev/null
-          python -m json.tool agentreview-self-test.sarif.json >/dev/null
+          python - <<'PY'
+          import json
+
+          with open("agentreview-self-test-report.json", encoding="utf-8") as file:
+              report = json.load(file)
+          for key in ("risk_score", "risk_level", "findings", "changed_files", "review_requirements"):
+              if key not in report:
+                  raise SystemExit(f"missing JSON report key: {key}")
+          if not isinstance(report["findings"], list):
+              raise SystemExit("JSON report findings must be a list")
+          if not isinstance(report["changed_files"], list):
+              raise SystemExit("JSON report changed_files must be a list")
+          if not isinstance(report["review_requirements"], list):
+              raise SystemExit("JSON report review_requirements must be a list")
+
+          with open("agentreview-self-test.sarif.json", encoding="utf-8") as file:
+              sarif = json.load(file)
+          if sarif.get("version") != "2.1.0":
+              raise SystemExit("SARIF version must be 2.1.0")
+          if "runs" not in sarif:
+              raise SystemExit("SARIF output must include runs")
+          PY

@@ -46,11 +46,7 @@ def create_user(
 
 
 def list_users(session: Session, *, organization_id: str) -> list[UserRecord]:
-    statement = (
-        select(UserRecord)
-        .where(UserRecord.organization_id == organization_id)
-        .order_by(UserRecord.email)
-    )
+    statement = select(UserRecord).where(UserRecord.organization_id == organization_id).order_by(UserRecord.email)
     return list(session.scalars(statement).all())
 
 
@@ -321,10 +317,7 @@ def list_audit_events(
     since=None,
     until=None,
 ) -> list[AuditEventRecord]:
-    statement = (
-        select(AuditEventRecord)
-        .where(AuditEventRecord.organization_id == organization_id)
-    )
+    statement = select(AuditEventRecord).where(AuditEventRecord.organization_id == organization_id)
     if action is not None:
         statement = statement.where(AuditEventRecord.action == action)
     if target_type is not None:
@@ -510,13 +503,12 @@ def create_analysis_run(
     return record
 
 
-def list_analysis_runs(session: Session, *, organization_id: str | None = None, limit: int = 50) -> list[AnalysisRunRecord]:
-    statement = (
-        select(AnalysisRunRecord)
-        .options(
-            selectinload(AnalysisRunRecord.changed_files),
-            selectinload(AnalysisRunRecord.findings),
-        )
+def list_analysis_runs(
+    session: Session, *, organization_id: str | None = None, limit: int = 50
+) -> list[AnalysisRunRecord]:
+    statement = select(AnalysisRunRecord).options(
+        selectinload(AnalysisRunRecord.changed_files),
+        selectinload(AnalysisRunRecord.findings),
     )
     if organization_id is not None:
         statement = statement.where(AnalysisRunRecord.organization_id == organization_id)
@@ -524,7 +516,9 @@ def list_analysis_runs(session: Session, *, organization_id: str | None = None, 
     return list(session.scalars(statement).all())
 
 
-def get_analysis_run(session: Session, analysis_run_id: str, *, organization_id: str | None = None) -> AnalysisRunRecord | None:
+def get_analysis_run(
+    session: Session, analysis_run_id: str, *, organization_id: str | None = None
+) -> AnalysisRunRecord | None:
     statement = (
         select(AnalysisRunRecord)
         .where(AnalysisRunRecord.id == analysis_run_id)
@@ -638,10 +632,7 @@ def to_risk_findings(record: AnalysisRunRecord) -> list[RiskFinding]:
 
 
 def to_review_requirements(record: AnalysisRunRecord) -> list[ReviewRequirement]:
-    return [
-        ReviewRequirement.model_validate(requirement)
-        for requirement in (record.review_requirements_json or [])
-    ]
+    return [ReviewRequirement.model_validate(requirement) for requirement in (record.review_requirements_json or [])]
 
 
 def _build_summary(changed_files: list[DiffFile], analysis: RiskAnalysis) -> str:

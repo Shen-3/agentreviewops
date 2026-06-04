@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fnmatch import fnmatchcase
-from pathlib import Path
 import re
 import shlex
+from fnmatch import fnmatchcase
+from pathlib import Path
 
 from agentreview.models import AddedDiffLine, AgentReviewConfig, DiffFile, DiffStatus
 

@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from agentreview.ai import DiffSummaryResult
-from agentreview.models import AgentReviewConfig, DiffFile, ReviewRequirement, RiskAnalysis, RiskFinding, SuggestedReviewer
+from agentreview.models import (
+    AgentReviewConfig,
+    DiffFile,
+    ReviewRequirement,
+    RiskAnalysis,
+    RiskFinding,
+    SuggestedReviewer,
+)
 
 
 def generate_markdown_report(
@@ -29,24 +36,26 @@ def generate_markdown_report(
     if ai_summary is not None:
         sections.extend(["", "## AI Summary", "", _build_ai_summary(ai_summary)])
 
-    sections.extend([
-        "",
-        "## Findings table",
-        "",
-        _build_findings_table(analysis.findings),
-        "",
-        "## Changed files summary",
-        "",
-        _build_changed_files_table(changed_files),
-        "",
-        "## Suggested human review checklist",
-        "",
-        _build_checklist(analysis.findings, active_review_requirements),
-        "",
-        "## Policy Config Used",
-        "",
-        _build_config_summary(active_config),
-    ])
+    sections.extend(
+        [
+            "",
+            "## Findings table",
+            "",
+            _build_findings_table(analysis.findings),
+            "",
+            "## Changed files summary",
+            "",
+            _build_changed_files_table(changed_files),
+            "",
+            "## Suggested human review checklist",
+            "",
+            _build_checklist(analysis.findings, active_review_requirements),
+            "",
+            "## Policy Config Used",
+            "",
+            _build_config_summary(active_config),
+        ]
+    )
     return "\n".join(sections).rstrip() + "\n"
 
 
@@ -71,7 +80,10 @@ def _build_summary(analysis: RiskAnalysis, changed_files: list[DiffFile]) -> str
 
     positive_findings = [finding for finding in analysis.findings if finding.score_delta > 0]
     if not positive_findings:
-        return f"{len(changed_files)} file(s) changed with no positive risk findings from the configured deterministic rules."
+        return (
+            f"{len(changed_files)} file(s) changed with no positive risk findings from the configured deterministic "
+            "rules."
+        )
 
     highest_severity = _highest_positive_severity(positive_findings).upper()
     return (
@@ -183,16 +195,15 @@ def _build_changed_files_table(changed_files: list[DiffFile]) -> str:
 
 
 def _build_config_summary(config: AgentReviewConfig) -> str:
-    enabled_rules = [
-        name
-        for name, enabled in config.rules.model_dump().items()
-        if enabled
-    ]
+    enabled_rules = [name for name, enabled in config.rules.model_dump().items() if enabled]
     return "\n".join(
         [
             f"- Version: {config.version}",
             f"- Fail level: {config.risk.fail_level}",
-            f"- Large diff threshold: {config.risk.large_diff.max_files} files / {config.risk.large_diff.max_lines} lines",
+            (
+                f"- Large diff threshold: {config.risk.large_diff.max_files} files / "
+                f"{config.risk.large_diff.max_lines} lines"
+            ),
             f"- Critical paths: {len(config.critical_paths)} configured",
             f"- Test patterns: {', '.join(config.test_patterns)}",
             f"- Enabled rules: {', '.join(enabled_rules) if enabled_rules else 'none'}",

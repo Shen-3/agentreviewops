@@ -43,7 +43,9 @@ def bootstrap_account(
 
     organization = _get_or_create_organization(session, slug=normalized_slug, name=org_name.strip() or normalized_slug)
     user = _get_or_create_user(session, organization_id=organization.id, email=normalized_email, name=user_name)
-    api_key, secret = create_api_key(session, organization_id=organization.id, name=api_key_name.strip() or "Bootstrap key")
+    api_key, secret = create_api_key(
+        session, organization_id=organization.id, name=api_key_name.strip() or "Bootstrap key"
+    )
     create_audit_event(
         session,
         organization_id=organization.id,

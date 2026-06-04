@@ -29,7 +29,9 @@ def test_ai_summary_disabled_does_not_call_provider() -> None:
     provider = FakeProvider()
     analysis = RiskAnalysis(risk_score=0, risk_level="low")
 
-    result = generate_ai_summary(provider=provider, analysis=analysis, changed_files=[], diff_text="token=secret", enabled=False)
+    result = generate_ai_summary(
+        provider=provider, analysis=analysis, changed_files=[], diff_text="token=secret", enabled=False
+    )
 
     assert result is None
     assert provider.requests == []
@@ -93,7 +95,10 @@ def test_openai_compatible_provider_posts_redacted_analysis(monkeypatch) -> None
                 "choices": [
                     {
                         "message": {
-                            "content": '{"summary":"Review auth behavior and missing tests.","checklist":["Confirm owner review.","Add tests."]}'
+                            "content": (
+                                '{"summary":"Review auth behavior and missing tests.",'
+                                '"checklist":["Confirm owner review.","Add tests."]}'
+                            )
                         }
                     }
                 ]
@@ -114,7 +119,9 @@ def test_openai_compatible_provider_posts_redacted_analysis(monkeypatch) -> None
     request = DiffSummaryRequest(
         risk_score=55,
         risk_level="high",
-        changed_files=[DiffFile(path="auth/session.py", status="modified", additions=3, deletions=1, language="python")],
+        changed_files=[
+            DiffFile(path="auth/session.py", status="modified", additions=3, deletions=1, language="python")
+        ],
         findings=[],
         redacted_diff="OPENAI_API_KEY=[REDACTED]\n" + ("x" * 200),
     )

@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import select
 from typer.testing import CliRunner
@@ -8,7 +7,7 @@ from typer.testing import CliRunner
 from agentreview.cli import app
 from agentreview_api.auth import authenticate_api_key, key_prefix
 from agentreview_api.db import ApiKeyRecord, AuditEventRecord, create_session_factory
-
+from alembic import command
 
 PROJECT_ROOT = Path(__file__).parents[1]
 

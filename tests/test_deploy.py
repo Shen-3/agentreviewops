@@ -2,7 +2,6 @@ from pathlib import Path
 
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).parents[1]
 
 

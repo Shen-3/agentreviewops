@@ -2,7 +2,6 @@ from pathlib import Path
 
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).parents[1]
 
 
@@ -20,13 +19,27 @@ def test_ci_workflow_yaml_is_valid() -> None:
     workflow = yaml.safe_load((PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
 
     assert workflow["name"] == "CI"
-    assert "quality" in workflow["jobs"]
-    assert workflow["jobs"]["quality"]["runs-on"] == "ubuntu-latest"
-    steps = str(workflow["jobs"]["quality"]["steps"])
-    assert "astral-sh/setup-uv@v5" in steps
-    assert "uv run pytest" in steps
-    assert "pnpm/action-setup@v4" in steps
-    assert "pnpm --filter agentreviewops-web build" in steps
+    assert set(workflow["jobs"]) == {"python-quality", "postgres-migrations", "web-build"}
+    assert workflow["jobs"]["python-quality"]["runs-on"] == "ubuntu-latest"
+    assert workflow["jobs"]["postgres-migrations"]["runs-on"] == "ubuntu-latest"
+    assert workflow["jobs"]["web-build"]["runs-on"] == "ubuntu-latest"
+
+    python_steps = str(workflow["jobs"]["python-quality"]["steps"])
+    assert "astral-sh/setup-uv@v5" in python_steps
+    assert "uv run ruff check ." in python_steps
+    assert "uv run ruff format --check ." in python_steps
+    assert "uv run pytest --cov=agentreview --cov=agentreview_api --cov-report=term-missing" in python_steps
+    assert "uv run alembic upgrade head" in python_steps
+    assert "git diff --check" in python_steps
+
+    postgres_job = workflow["jobs"]["postgres-migrations"]
+    assert "postgres" in postgres_job["services"]
+    assert "postgresql+psycopg://" in str(postgres_job["steps"])
+
+    web_steps = str(workflow["jobs"]["web-build"]["steps"])
+    assert "pnpm/action-setup@v4" in web_steps
+    assert "pnpm --filter agentreviewops-web build" in web_steps
+    assert "pnpm --filter agentreviewops-web lint" in web_steps
 
 
 def test_root_composite_action_yaml_is_valid() -> None:
@@ -69,7 +82,9 @@ def test_root_composite_action_yaml_is_valid() -> None:
 
 
 def test_action_self_test_workflow_is_read_only_and_uses_local_action() -> None:
-    workflow = yaml.safe_load((PROJECT_ROOT / ".github" / "workflows" / "action-self-test.yml").read_text(encoding="utf-8"))
+    workflow = yaml.safe_load(
+        (PROJECT_ROOT / ".github" / "workflows" / "action-self-test.yml").read_text(encoding="utf-8")
+    )
 
     assert workflow["name"] == "Action Self Test"
     assert workflow["permissions"] == {"contents": "read"}
@@ -81,6 +96,10 @@ def test_action_self_test_workflow_is_read_only_and_uses_local_action() -> None:
     assert "request-reviewers': 'false'" in steps_text
     assert "agentreview-self-test-report.json" in steps_text
     assert "agentreview-self-test.sarif.json" in steps_text
+    assert "risk_score" in steps_text
+    assert "risk_level" in steps_text
+    assert "review_requirements" in steps_text
+    assert "2.1.0" in steps_text
 
 
 def test_github_action_docs_explain_artifact_flow() -> None:
@@ -96,7 +115,7 @@ def test_github_action_docs_explain_artifact_flow() -> None:
     assert "agentreview submit-diff" in docs
     assert "agentreview comment-pr" in docs
     assert "agentreview request-reviewers" in docs
-    assert "request-reviewers: \"true\"" in docs
+    assert 'request-reviewers: "true"' in docs
     assert "$GITHUB_ACTION_PATH" in docs
     assert "actions/checkout@v6" in docs
     assert "actions/setup-python@v6" in docs
@@ -110,8 +129,12 @@ def test_release_docs_exist_and_document_validation() -> None:
     docs = (PROJECT_ROOT / "docs" / "release.md").read_text(encoding="utf-8")
 
     assert "uv sync --extra dev" in docs
-    assert "uv run pytest" in docs
+    assert "uv run ruff check ." in docs
+    assert "uv run ruff format --check ." in docs
+    assert "uv run pytest --cov=agentreview --cov=agentreview_api --cov-report=term-missing" in docs
+    assert "uv run alembic upgrade head" in docs
     assert "pnpm install --frozen-lockfile" in docs
+    assert "pnpm --filter agentreviewops-web lint" in docs
     assert "git tag -a v0.x.y" in docs
     assert "git push origin -f v0" in docs
 

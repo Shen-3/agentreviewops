@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 from datetime import datetime, timezone
-import os
 from uuid import uuid4
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
@@ -28,10 +28,14 @@ class OrganizationRecord(Base):
     )
 
     users: Mapped[list[UserRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
-    repositories: Mapped[list[RepositoryRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    repositories: Mapped[list[RepositoryRecord]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan"
+    )
     api_keys: Mapped[list[ApiKeyRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     policies: Mapped[list[PolicyRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
-    audit_events: Mapped[list[AuditEventRecord]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    audit_events: Mapped[list[AuditEventRecord]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan"
+    )
     analysis_runs: Mapped[list[AnalysisRunRecord]] = relationship(back_populates="organization")
 
 
@@ -50,12 +54,16 @@ class UserRecord(Base):
     )
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="users")
-    repository_memberships: Mapped[list[RepositoryMembershipRecord]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    repository_memberships: Mapped[list[RepositoryMembershipRecord]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class RepositoryRecord(Base):
     __tablename__ = "repositories"
-    __table_args__ = (UniqueConstraint("organization_id", "provider", "owner", "name", name="uq_repositories_identity"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "provider", "owner", "name", name="uq_repositories_identity"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
@@ -71,7 +79,9 @@ class RepositoryRecord(Base):
     )
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="repositories")
-    memberships: Mapped[list[RepositoryMembershipRecord]] = relationship(back_populates="repository", cascade="all, delete-orphan")
+    memberships: Mapped[list[RepositoryMembershipRecord]] = relationship(
+        back_populates="repository", cascade="all, delete-orphan"
+    )
     policies: Mapped[list[PolicyRecord]] = relationship(back_populates="repository", cascade="all, delete-orphan")
 
 

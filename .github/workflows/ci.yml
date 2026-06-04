@@ -5,8 +5,8 @@ name: CI
   pull_request:
 
 jobs:
-  quality:
-    name: Python tests and web build
+  python-quality:
+    name: Python quality gates
     runs-on: ubuntu-latest
 
     steps:
@@ -26,8 +26,70 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --extra dev
 
-      - name: Run Python tests
-        run: uv run pytest
+      - name: Run Ruff lint
+        run: uv run ruff check .
+
+      - name: Check Ruff formatting
+        run: uv run ruff format --check .
+
+      - name: Run Python tests with coverage
+        run: uv run pytest --cov=agentreview --cov=agentreview_api --cov-report=term-missing
+
+      - name: Run SQLite migration smoke test
+        env:
+          AGENTREVIEW_DATABASE_URL: sqlite:///./agentreview-ci.db
+        run: uv run alembic upgrade head
+
+      - name: Check whitespace
+        run: git diff --check
+
+  postgres-migrations:
+    name: PostgreSQL migration smoke test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: agentreviewops
+          POSTGRES_PASSWORD: agentreviewops
+          POSTGRES_USER: agentreviewops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentreviewops -d agentreviewops"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+
+      - name: Run PostgreSQL migrations
+        env:
+          AGENTREVIEW_DATABASE_URL: postgresql+psycopg://agentreviewops:agentreviewops@127.0.0.1:5432/agentreviewops
+        run: uv run alembic upgrade head
+
+  web-build:
+    name: Web dashboard build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -46,3 +108,6 @@ jobs:
 
       - name: Build dashboard
         run: pnpm --filter agentreviewops-web build
+
+      - name: Lint dashboard
+        run: pnpm --filter agentreviewops-web lint

@@ -4,10 +4,12 @@ Revision ID: 0002_add_auth_foundation
 Revises: 0001_create_analysis_tables
 Create Date: 2026-05-24
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0002_add_auth_foundation"
 down_revision = "0001_create_analysis_tables"
@@ -26,7 +28,12 @@ def upgrade() -> None:
     op.create_table(
         "users",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("organization_id", sa.String(length=36), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "organization_id",
+            sa.String(length=36),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("email", sa.String(length=255), nullable=False, unique=True),
         sa.Column("name", sa.String(length=255), nullable=True),
         sa.Column("role", sa.String(length=50), nullable=False),
@@ -35,7 +42,12 @@ def upgrade() -> None:
     op.create_table(
         "repositories",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("organization_id", sa.String(length=36), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "organization_id",
+            sa.String(length=36),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("provider", sa.String(length=50), nullable=False),
         sa.Column("owner", sa.String(length=255), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
@@ -47,7 +59,9 @@ def upgrade() -> None:
     op.create_table(
         "repository_memberships",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("repository_id", sa.String(length=36), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "repository_id", sa.String(length=36), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("role", sa.String(length=50), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -56,7 +70,12 @@ def upgrade() -> None:
     op.create_table(
         "api_keys",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("organization_id", sa.String(length=36), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "organization_id",
+            sa.String(length=36),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("key_prefix", sa.String(length=32), nullable=False, unique=True),
         sa.Column("key_hash", sa.String(length=64), nullable=False),

@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -12,6 +11,7 @@ from agentreview_api.db import create_session_factory
 from agentreview_api.main import app as api_app
 from agentreview_api.main import get_session
 from agentreview_api.repository import create_api_key, create_organization
+from alembic import command
 
 
 def test_help_shows_product_name() -> None:
@@ -137,10 +137,7 @@ def test_scan_diff_writes_sarif_output(tmp_path: Path) -> None:
     sarif = json.loads(sarif_output_path.read_text(encoding="utf-8"))
     assert sarif["version"] == "2.1.0"
     assert sarif["runs"][0]["tool"]["driver"]["name"] == "AgentReviewOps"
-    assert "critical-path-change" in {
-        result["ruleId"]
-        for result in sarif["runs"][0]["results"]
-    }
+    assert "critical-path-change" in {result["ruleId"] for result in sarif["runs"][0]["results"]}
 
 
 def test_scan_diff_checks_requires_repo_and_head_sha(tmp_path: Path) -> None:
@@ -480,7 +477,11 @@ ai:
             return None
 
         def json(self) -> dict:
-            return {"choices": [{"message": {"content": '{"summary":"AI reviewer summary.","checklist":["Inspect auth path."]}'}}]}
+            return {
+                "choices": [
+                    {"message": {"content": '{"summary":"AI reviewer summary.","checklist":["Inspect auth path."]}'}}
+                ]
+            }
 
     monkeypatch.setenv("AGENTREVIEW_OPENAI_API_KEY", "test-ai-key")
     monkeypatch.setattr("agentreview.ai.httpx.post", lambda *_args, **_kwargs: Response())
@@ -684,6 +685,7 @@ def test_submit_diff_persists_analysis_with_api(tmp_path: Path, monkeypatch) -> 
     api_app.dependency_overrides[get_session] = override_get_session
     try:
         with TestClient(api_app) as api_client:
+
             def post_to_testclient(url, *, json, headers, timeout):
                 return api_client.post(urlsplit(url).path, json=json, headers=headers)
 

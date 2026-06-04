@@ -15,9 +15,13 @@ Run the full local validation suite:
 
 ```bash
 uv sync --extra dev
-uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest --cov=agentreview --cov=agentreview_api --cov-report=term-missing
+uv run alembic upgrade head
 pnpm install --frozen-lockfile
 pnpm --filter agentreviewops-web build
+pnpm --filter agentreviewops-web lint
 git diff --check
 ```
 

@@ -4,10 +4,12 @@ Revision ID: 0007_add_review_requirements
 Revises: 0006_add_api_key_roles
 Create Date: 2026-06-02
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0007_add_review_requirements"
 down_revision = "0006_add_api_key_roles"

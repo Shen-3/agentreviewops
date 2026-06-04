@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-import os
 import json
-from typing import Any, Callable
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 

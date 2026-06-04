@@ -3,7 +3,6 @@ from pathlib import Path
 from agentreview.config import parse_config
 from agentreview.gitdiff import parse_unified_diff
 from agentreview.models import AgentReviewConfig, RiskAnalysis, RiskFinding, SuggestedReviewer
-from agentreview.risk import analyze_risk
 from agentreview.routing import build_review_requirements, codeowners_for_path, load_codeowners_text, parse_codeowners
 
 
@@ -127,7 +126,9 @@ def test_duplicate_reviewers_are_deduplicated() -> None:
         codeowners_text="auth/** @security-team @security-team\n",
     )
 
-    assert [(reviewer.source, reviewer.identifier, reviewer.role) for reviewer in requirements[0].suggested_reviewers] == [
+    assert [
+        (reviewer.source, reviewer.identifier, reviewer.role) for reviewer in requirements[0].suggested_reviewers
+    ] == [
         ("codeowners", "@security-team", None),
         ("repository_membership", "alice@example.com", "maintainer"),
     ]

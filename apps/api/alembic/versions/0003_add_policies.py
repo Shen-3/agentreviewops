@@ -4,10 +4,12 @@ Revision ID: 0003_add_policies
 Revises: 0002_add_auth_foundation
 Create Date: 2026-05-24
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0003_add_policies"
 down_revision = "0002_add_auth_foundation"
@@ -19,7 +21,12 @@ def upgrade() -> None:
     op.create_table(
         "policies",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("organization_id", sa.String(length=36), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "organization_id",
+            sa.String(length=36),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("scope", sa.String(length=50), nullable=False),
         sa.Column("config_json", sa.JSON(), nullable=False),

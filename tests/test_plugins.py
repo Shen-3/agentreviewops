@@ -95,7 +95,9 @@ def test_enabled_example_plugin_adds_validated_finding_to_analysis() -> None:
     )
     changed_files = [DiffFile(path="package.json", status="modified", additions=2, deletions=1)]
 
-    plugin_findings = run_analyzer_plugins([DependencyManifestPlugin()], AnalysisContext(changed_files=changed_files, config=config))
+    plugin_findings = run_analyzer_plugins(
+        [DependencyManifestPlugin()], AnalysisContext(changed_files=changed_files, config=config)
+    )
     analysis = analyze_risk(changed_files, config=config, plugin_findings=plugin_findings)
 
     assert [finding.rule_id for finding in plugin_findings] == ["plugin-dependency-manifest"]

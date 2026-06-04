@@ -97,6 +97,20 @@ uv run alembic upgrade head
 uv run uvicorn agentreview_api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+### Local Quality Gates
+
+Run these checks before pushing changes:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest --cov=agentreview --cov=agentreview_api --cov-report=term-missing
+uv run alembic upgrade head
+pnpm --filter agentreviewops-web build
+pnpm --filter agentreviewops-web lint
+git diff --check
+```
+
 ### Legacy/Manual Fallback
 
 The classic editable install remains available if `uv` is not installed:
@@ -373,4 +387,4 @@ The CLI runs locally without sending source code to external services.
 
 ## Contributing
 
-Keep changes focused and testable. Public commands should be documented, and new behavior should include tests.
+Keep changes focused and testable. Public commands should be documented, and new behavior should include tests. Run the local quality gates before opening or updating a pull request.
