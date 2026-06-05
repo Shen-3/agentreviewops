@@ -399,6 +399,36 @@ def test_user_github_login_validation_update_clear_and_duplicate_detection(clien
     assert duplicate_response.status_code == 409
     assert duplicate_response.json() == {"detail": "GitHub login already belongs to another user"}
 
+    too_long_response = client.post(
+        "/api/users",
+        json={
+            "email": "too-long-login@example.com",
+            "github_login": "a" * 40,
+            "role": "reviewer",
+        },
+    )
+    assert too_long_response.status_code == 422
+
+    null_login_response = client.post(
+        "/api/users",
+        json={
+            "email": "no-login-one@example.com",
+            "role": "reviewer",
+        },
+    )
+    second_null_login_response = client.post(
+        "/api/users",
+        json={
+            "email": "no-login-two@example.com",
+            "github_login": None,
+            "role": "reviewer",
+        },
+    )
+    assert null_login_response.status_code == 200
+    assert null_login_response.json()["github_login"] is None
+    assert second_null_login_response.status_code == 200
+    assert second_null_login_response.json()["github_login"] is None
+
 
 def test_api_key_management_lists_creates_and_revokes_keys(client: TestClient) -> None:
     list_response = client.get("/api/api-keys")

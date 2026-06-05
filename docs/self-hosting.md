@@ -120,6 +120,16 @@ pnpm --filter agentreviewops-web dev
 
 ## Configure Policies
 
+Start new repositories with a built-in bundle when you want a local policy file:
+
+```bash
+agentreview init --bundle starter
+agentreview bundles list
+agentreview bundles show security
+```
+
+The generated `.agentreview.yml` can be saved as an organization or repository policy from the dashboard. Bundles are deterministic presets; edit the YAML when your repository needs custom critical paths or routing roles.
+
 Create organization users from the dashboard or `POST /api/users`, then onboard repositories from the dashboard or `POST /api/repositories`. Set each user's optional GitHub login when you want repository memberships to become requestable PR reviewers. AgentReviewOps stores the login without a leading `@`, validates GitHub username syntax, and rejects duplicate logins inside the organization case-insensitively. Emails are not mapped to GitHub users automatically. Assign users to repositories with the dashboard routing form or `POST /api/repositories/{repository_id}/memberships`. Update roles and GitHub login mappings from the dashboard or the matching `PATCH` endpoints. Remove stale users, repositories, or reviewer assignments from the same dashboard panels or with the matching `DELETE` endpoints. These governance endpoints require an admin API key.
 
 Policies saved with `scope: "repository"` and a repository ID apply before organization policies when `POST /api/analyze/diff` receives a matching `repository` value such as `owner/name`. If no repository policy matches, AgentReviewOps uses the latest enabled organization policy, then request config, then defaults. Use the dashboard or `PATCH /api/policies/{policy_id}` to rename, replace, enable, or disable saved policies without deleting their audit history.

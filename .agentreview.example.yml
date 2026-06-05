@@ -1,3 +1,6 @@
+# Example AgentReviewOps config.
+# To generate a preset config and workflow, run:
+#   agentreview init --bundle starter
 version: 1
 
 risk:

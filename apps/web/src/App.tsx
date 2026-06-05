@@ -86,6 +86,7 @@ import { RepositoriesPage } from "./pages/RepositoriesPage";
 import { UsersPage } from "./pages/UsersPage";
 
 const API_BASE_URL = DEFAULT_API_BASE_URL;
+const POLICY_BUNDLE_IDS = ["starter", "security", "github-actions", "python", "dependency-governance", "ai-pr-strict", "enterprise-strict"];
 
 export default function App() {
   const initialStoredApiKey = React.useMemo(readStoredApiKey, []);
@@ -802,6 +803,9 @@ export default function App() {
           <a className="nav-link active" href="#analyses">
             Analyses
           </a>
+          <a className="nav-link" href="#onboarding">
+            Onboarding
+          </a>
           <a className="nav-link" href="#governance">
             Governance
           </a>
@@ -891,6 +895,8 @@ export default function App() {
             <Metric label="Active keys" value={activeApiKeyCount} />
           </section>
 
+          <OnboardingPanel />
+
           <DiffSubmitPanel
             form={diffForm}
             mode={mode}
@@ -904,15 +910,13 @@ export default function App() {
           />
         </DashboardPage>
 
-        <GovernanceMetricsPage>
-          <GovernanceMetricsPanel
-            overview={metricsOverview}
-            rules={metricsRules}
-            routing={metricsRouting}
-            repositories={metricsRepositories}
-            mode={mode}
-          />
-        </GovernanceMetricsPage>
+        <GovernanceMetricsPage
+          overview={metricsOverview}
+          rules={metricsRules}
+          routing={metricsRouting}
+          repositories={metricsRepositories}
+          mode={mode}
+        />
 
         <AnalysisRunsPage>
           <section className="analysis-list" aria-labelledby="analysis-list-title">
@@ -1046,7 +1050,7 @@ export default function App() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
       <span>{label}</span>
@@ -1055,166 +1059,52 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function GovernanceMetricsPanel({
-  overview,
-  rules,
-  routing,
-  repositories,
-  mode,
-}: {
-  overview: MetricsOverview;
-  rules: MetricsRules;
-  routing: MetricsRouting;
-  repositories: MetricsRepositories;
-  mode: LoadMode;
-}) {
-  const maxRiskCount = Math.max(1, ...Object.values(overview.risk_distribution));
-  const maxTrendCount = Math.max(1, ...overview.recent_trend.map((point) => point.analysis_count));
+function OnboardingPanel() {
   return (
-    <section className="governance-panel" id="governance" aria-labelledby="governance-metrics-title">
+    <section className="onboarding-panel" id="onboarding" aria-labelledby="onboarding-title">
       <div className="section-head">
         <div>
-          <p className="eyebrow">Governance</p>
-          <h2 id="governance-metrics-title">Governance metrics</h2>
-          <p>{mode === "loading" ? "Loading metrics..." : `Generated ${formatDate(overview.generated_at)}`}</p>
+          <p className="eyebrow">Onboarding</p>
+          <h2 id="onboarding-title">Repository setup</h2>
+          <p>Use the CLI-generated config and workflow as the first review gate.</p>
         </div>
       </div>
-
-      <section className="metrics governance-summary" aria-label="Governance summary">
-        <Metric label="Total analyses" value={overview.analysis_count} />
-        <Metric label="High or block" value={overview.high_or_block_count} />
-        <Metric label="Avg risk score" value={overview.average_risk_score} />
-        <Metric label="Unconfigured routes" value={routing.unconfigured_review_requirement_count} />
-      </section>
-
-      <div className="governance-grid">
-        <section className="governance-section">
-          <h3>Risk distribution</h3>
-          <div className="bar-list">
-            {(["block", "high", "medium", "low"] as RiskLevel[]).map((level) => (
-              <div className="bar-row" key={level}>
-                <span>{level}</span>
-                <div className="bar-track">
-                  <span style={{ width: barWidth(overview.risk_distribution[level], maxRiskCount) }} />
-                </div>
-                <strong>{overview.risk_distribution[level]}</strong>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="governance-section">
-          <h3>Recent trend</h3>
-          <div className="trend-list">
-            {overview.recent_trend.slice(-10).map((point) => (
-              <div className="trend-row" key={point.date}>
-                <span>{point.date.slice(5)}</span>
-                <div className="bar-track">
-                  <span style={{ width: barWidth(point.analysis_count, maxTrendCount) }} />
-                </div>
-                <strong>{point.analysis_count}</strong>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="governance-section">
-          <h3>Top rules</h3>
-          <div className="table-wrap compact-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Rule</th>
-                  <th>Findings</th>
-                  <th>Avg score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rules.top_rules.length ? (
-                  rules.top_rules.map((rule) => (
-                    <tr key={rule.rule_id}>
-                      <td>{rule.rule_id}</td>
-                      <td>{rule.finding_count}</td>
-                      <td>{rule.average_score_delta}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={3}>No triggered rules.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="governance-section">
-          <h3>Routing</h3>
-          <dl className="routing-metrics">
-            <div>
-              <dt>Hit rate</dt>
-              <dd>{formatPercent(routing.routing_hit_rate)}</dd>
-            </div>
-            <div>
-              <dt>Configured</dt>
-              <dd>{routing.configured_review_requirement_count}</dd>
-            </div>
-            <div>
-              <dt>Unconfigured</dt>
-              <dd>{routing.unconfigured_review_requirement_count}</dd>
-            </div>
-            <div>
-              <dt>Total</dt>
-              <dd>{routing.total_review_requirement_count}</dd>
-            </div>
-          </dl>
-          <div className="metadata-list">
-            {routing.top_unconfigured_requirements.map((requirement) => (
-              <span className="metadata-pill" key={requirement.requirement_id}>
-                {requirement.title}: {requirement.count}
-              </span>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <section className="governance-section repository-risk-section">
-        <h3>Repository risk</h3>
-        <div className="table-wrap">
-          <table className="repository-risk-table">
-            <thead>
-              <tr>
-                <th>Repository</th>
-                <th>Analyses</th>
-                <th>Avg risk</th>
-                <th>Top risk</th>
-                <th>Unconfigured</th>
-                <th>Top rules</th>
-              </tr>
-            </thead>
-            <tbody>
-              {repositories.repositories.length ? (
-                repositories.repositories.map((repository) => (
-                  <tr key={repository.repository}>
-                    <td>{repository.repository}</td>
-                    <td>{repository.analysis_count}</td>
-                    <td>{repository.average_risk_score}</td>
-                    <td>
-                      <RiskBadge level={repository.top_risk_level} label={repository.top_risk_level.toUpperCase()} />
-                    </td>
-                    <td>{repository.unconfigured_review_requirement_count}</td>
-                    <td>{repository.top_triggered_rule_ids.join(", ") || "-"}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={6}>No repository metrics yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      <div className="onboarding-grid">
+        <ol className="setup-steps">
+          <li>Run `agentreview init --bundle starter` in the repository.</li>
+          <li>Commit `.agentreview.yml` and `.github/workflows/agentreview.yml`.</li>
+          <li>Add repository members with GitHub logins before enabling reviewer requests.</li>
+          <li>Review governance metrics for unconfigured routes after the first runs.</li>
+        </ol>
+        <div className="bundle-list" aria-label="Policy bundles">
+          {POLICY_BUNDLE_IDS.map((bundleId) => (
+            <span className="metadata-pill" key={bundleId}>
+              {bundleId}
+            </span>
+          ))}
         </div>
-      </section>
+        <pre className="workflow-snippet">{`name: AgentReviewOps
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Shen-3/agentreviewops@v0
+        with:
+          github-token: \${{ github.token }}
+          config: .agentreview.yml
+          comment: "true"
+          fail-on: high`}</pre>
+      </div>
     </section>
   );
 }
@@ -1560,6 +1450,10 @@ function RepositoryAdmin({
 }) {
   const liveData = dataSource === "api" && mode !== "error";
   const canEdit = liveData && canManageGovernance;
+  const missingReviewerLoginCount = repositories.reduce(
+    (total, repository) => total + repository.reviewers.filter((reviewer) => !reviewer.githubLogin).length,
+    0,
+  );
   return (
     <section className="repository-panel" id="repositories" aria-labelledby="repository-admin-title">
       <div className="section-head">
@@ -1618,6 +1512,11 @@ function RepositoryAdmin({
         </form>
       </div>
       {status || accessHint ? <span className="policy-status">{status || accessHint}</span> : null}
+      {missingReviewerLoginCount ? (
+        <div className="warning-callout" role="status">
+          {missingReviewerLoginCount} repository reviewer assignment(s) are missing GitHub login mapping.
+        </div>
+      ) : null}
       <form className="repository-routing-form" onSubmit={onAssignMembership}>
         <label>
           <span>Route repository</span>
@@ -2036,6 +1935,12 @@ function PolicyEditor({
             </button>
           </div>
         ) : null}
+      </div>
+
+      <div className="guidance-panel">
+        Built-in bundles provide review-routing starting points for common governance modes. Use `agentreview init
+        --bundle starter` for the default path, or choose {POLICY_BUNDLE_IDS.join(", ")} when a repository needs a
+        tighter preset.
       </div>
 
       <form className="policy-form" onSubmit={onSave}>
@@ -2843,17 +2748,6 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function formatPercent(value: number) {
-  return `${Math.round(value * 100)}%`;
-}
-
-function barWidth(value: number, maxValue: number) {
-  if (value <= 0 || maxValue <= 0) {
-    return "0%";
-  }
-  return `${Math.max(4, Math.round((value / maxValue) * 100))}%`;
 }
 
 function formatActor(actorType: string, actorId: string | null) {

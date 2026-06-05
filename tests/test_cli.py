@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from agentreview.cli import app
+from agentreview.config import load_config
 from agentreview.integrations.github import GitHubIntegrationError
 from agentreview_api.db import create_session_factory
 from agentreview_api.main import app as api_app
@@ -28,6 +29,8 @@ def test_help_shows_product_name() -> None:
     assert "scan-pr" in result.output
     assert "comment-pr" in result.output
     assert "request-reviewers" in result.output
+    assert "init" in result.output
+    assert "bundles" in result.output
 
 
 def test_version_shows_package_version() -> None:
@@ -37,6 +40,125 @@ def test_version_shows_package_version() -> None:
 
     assert result.exit_code == 0
     assert "agentreview 0.1.0" in result.output
+
+
+def test_bundles_list_and_show_commands() -> None:
+    runner = CliRunner()
+
+    list_result = runner.invoke(app, ["bundles", "list"])
+    show_result = runner.invoke(app, ["bundles", "show", "starter"])
+
+    assert list_result.exit_code == 0
+    assert "starter" in list_result.output
+    assert "enterprise-strict" in list_result.output
+    assert show_result.exit_code == 0
+    assert "version: 1" in show_result.output
+    assert "review_routing:" in show_result.output
+
+
+def test_bundles_show_rejects_invalid_bundle() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["bundles", "show", "unknown"])
+
+    assert result.exit_code == 2
+    assert "Unknown policy bundle" in result.output
+
+
+def test_init_creates_config_and_workflow(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["init", "--bundle", "starter", "--non-interactive"])
+
+    assert result.exit_code == 0
+    assert "Bundle: starter" in result.output
+    config_path = Path(".agentreview.yml")
+    workflow_path = Path(".github/workflows/agentreview.yml")
+    assert config_path.exists()
+    assert workflow_path.exists()
+    config = load_config(config_path)
+    assert config.version == 1
+    workflow = workflow_path.read_text(encoding="utf-8")
+    assert "Shen-3/agentreviewops@v0" in workflow
+    assert 'comment: "true"' in workflow
+    assert "fail-on: high" in workflow
+
+
+def test_init_force_overwrites_existing_files(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    Path(".agentreview.yml").write_text("old: true\n", encoding="utf-8")
+    Path(".github/workflows").mkdir(parents=True)
+    Path(".github/workflows/agentreview.yml").write_text("old workflow\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["init", "--bundle", "security", "--non-interactive", "--force"])
+
+    assert result.exit_code == 0
+    assert load_config(".agentreview.yml").risk.large_diff.max_files == 15
+    assert "old workflow" not in Path(".github/workflows/agentreview.yml").read_text(encoding="utf-8")
+
+
+def test_init_without_force_rejects_existing_files(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    Path(".agentreview.yml").write_text("version: 1\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["init", "--non-interactive"])
+
+    assert result.exit_code == 2
+    assert "already exists" in result.output
+
+
+def test_init_rejects_invalid_bundle(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["init", "--bundle", "unknown", "--non-interactive"])
+
+    assert result.exit_code == 2
+    assert "Unknown policy bundle" in result.output
+
+
+def test_init_no_write_workflow_only_creates_config(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["init", "--bundle", "python", "--non-interactive", "--no-write-workflow"])
+
+    assert result.exit_code == 0
+    assert Path(".agentreview.yml").exists()
+    assert not Path(".github/workflows/agentreview.yml").exists()
+
+
+def test_init_workflow_feature_options(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--bundle",
+            "ai-pr-strict",
+            "--non-interactive",
+            "--checks",
+            "--sarif",
+            "--request-reviewers",
+        ],
+    )
+
+    assert result.exit_code == 0
+    workflow = Path(".github/workflows/agentreview.yml").read_text(encoding="utf-8")
+    assert "checks: write" in workflow
+    assert 'checks: "true"' in workflow
+    assert "security-events: write" in workflow
+    assert "sarif-output: agentreview.sarif.json" in workflow
+    assert "github/codeql-action/upload-sarif@v3" in workflow
+    assert 'request-reviewers: "true"' in workflow
+    assert "reviewer-request-failure-mode: warn" in workflow
 
 
 def test_scan_diff_writes_report(tmp_path: Path) -> None:
@@ -662,6 +784,71 @@ def test_request_reviewers_warn_mode_continues_on_github_error(monkeypatch, tmp_
     assert "Warning: GitHub reviewer request failed" in result.output
     assert "GitHub API call: failed-warning" in result.output
     assert "ghs_secret" not in result.output
+
+
+def test_request_reviewers_fail_mode_exits_on_github_error(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    analysis_file = _write_analysis_json(
+        tmp_path,
+        [
+            {
+                "requirement_id": "security-review",
+                "title": "Security review",
+                "reason": "Sensitive change",
+                "suggested_reviewers": [{"source": "codeowners", "identifier": "@alice"}],
+            }
+        ],
+    )
+
+    def fake_request_pull_request_reviewers(**_kwargs):
+        raise GitHubIntegrationError("Resource not accessible by integration")
+
+    monkeypatch.setenv("GITHUB_TOKEN", "ghs_secret")
+    monkeypatch.setattr("agentreview.cli.request_pull_request_reviewers", fake_request_pull_request_reviewers)
+
+    result = runner.invoke(
+        app,
+        [
+            "request-reviewers",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--analysis-file",
+            str(analysis_file),
+            "--reviewer-request-failure-mode",
+            "fail",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "GitHub error: Resource not accessible by integration" in result.output
+    assert "ghs_secret" not in result.output
+
+
+def test_request_reviewers_rejects_invalid_failure_mode(tmp_path: Path) -> None:
+    runner = CliRunner()
+    analysis_file = _write_analysis_json(tmp_path, [])
+
+    result = runner.invoke(
+        app,
+        [
+            "request-reviewers",
+            "--repo",
+            "octo/example",
+            "--pr",
+            "123",
+            "--analysis-file",
+            str(analysis_file),
+            "--reviewer-request-failure-mode",
+            "ignore",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "reviewer-request-failure-mode" in result.output
+    assert "warn" in result.output
+    assert "fail" in result.output
 
 
 def test_request_reviewers_noop_does_not_require_token(monkeypatch, tmp_path: Path) -> None:

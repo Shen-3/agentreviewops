@@ -1,23 +1,6 @@
 # GitHub Action Usage
 
-The recommended GitHub Actions entrypoint is the root composite action:
-
-After the first release, use a stable release tag such as `Shen-3/agentreviewops@v0`. For production, pin to a release tag or a full commit SHA. Use `Shen-3/agentreviewops@main` only for development or testing unreleased changes.
-
-```yaml
-- uses: Shen-3/agentreviewops@v0
-  with:
-    github-token: ${{ github.token }}
-    config: .agentreview.yml
-    comment: "true"
-    checks: "true"
-    sarif-output: agentreview.sarif.json
-    request-reviewers: "true"
-    reviewer-request-mode: users-and-teams
-    reviewer-request-failure-mode: warn
-    fail-on: high
-    codeowners-file: .github/CODEOWNERS
-```
+The recommended GitHub Actions entrypoint is the root composite action. After the first release, use a stable release tag such as `Shen-3/agentreviewops@v0`. For production, pin to a release tag or a full commit SHA. Use `Shen-3/agentreviewops@main` only for development or testing unreleased changes.
 
 The action installs AgentReviewOps from its own `$GITHUB_ACTION_PATH`, builds a pull request diff when `diff-file` is not provided, writes a Markdown report, optionally posts the report as a PR comment, optionally requests GitHub reviewers, optionally submits the analysis to a self-hosted AgentReviewOps API, and applies the configured CI failure threshold.
 
@@ -25,9 +8,9 @@ Keep API keys in GitHub Secrets. Do not echo GitHub tokens, AgentReviewOps API k
 
 The composite action installs the local package with `python -m pip install "$GITHUB_ACTION_PATH"` instead of editable install. It still resolves Python package dependencies at runtime; a future hardening step could publish a prebuilt Docker action or pinned wheel artifact.
 
-## Recommended Workflow
+## Minimal Setup
 
-Create `.github/workflows/agentreview.yml`:
+This is the smallest PR comment gate:
 
 ```yaml
 name: AgentReviewOps
@@ -42,33 +25,69 @@ permissions:
   security-events: write
 
 jobs:
-  review-gate:
+  agentreview:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - uses: Shen-3/agentreviewops@v0
         with:
           github-token: ${{ github.token }}
+          comment: "true"
+          fail-on: high
+```
+
+## Generated Workflow
+
+Generate a starter config and workflow:
+
+```bash
+agentreview init --bundle starter
+```
+
+The generated workflow uses `.agentreview.yml` and keeps advanced features disabled unless selected:
+
+```yaml
+name: AgentReviewOps
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Use a released tag or pin to a full commit SHA for production.
+      - uses: Shen-3/agentreviewops@v0
+        with:
+          github-token: ${{ github.token }}
           config: .agentreview.yml
           comment: "true"
-          checks: "true"
-          sarif-output: agentreview.sarif.json
-          request-reviewers: "true"
-          reviewer-request-mode: users-and-teams
-          reviewer-request-failure-mode: warn
           fail-on: high
-          codeowners-file: .github/CODEOWNERS
-
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: agentreview.sarif.json
 ```
 
 When `diff-file` is omitted on `pull_request` or `pull_request_target` events, the action reads the event payload, resolves the base/head SHAs, and writes a temporary unified diff before running `agentreview scan-diff`.
+
+## Permissions By Feature
+
+| Feature | Required permissions |
+|---|---|
+| PR comments | `contents: read`, `pull-requests: write` |
+| GitHub Check Runs | `contents: read`, `checks: write` |
+| Reviewer requests | `contents: read`, `pull-requests: write` |
+| SARIF upload | `contents: read`, `security-events: write` |
+
+Combine permissions when enabling multiple features.
 
 ## `fail-on`
 

@@ -30,6 +30,7 @@ from agentreview.integrations.github import (
 )
 from agentreview.models import ReviewRequirement
 from agentreview.plugins import PluginError
+from agentreview.policy_bundles import get_policy_bundle, list_policy_bundles, policy_bundle_to_yaml
 from agentreview.routing import load_codeowners_text
 from agentreview.sarif import analysis_to_sarif
 
@@ -40,6 +41,8 @@ app = typer.Typer(
 )
 admin_app = typer.Typer(help="Administrative commands for self-hosted AgentReviewOps.")
 app.add_typer(admin_app, name="admin")
+bundles_app = typer.Typer(help="Inspect built-in AgentReviewOps policy bundles.")
+app.add_typer(bundles_app, name="bundles")
 
 
 class FailOnLevel(StrEnum):
@@ -153,6 +156,119 @@ def bootstrap_admin(
     typer.echo(f"API key: {result.api_key_secret}")
     typer.echo("")
     typer.echo("Store this API key now. It is hashed in the database and cannot be shown again.")
+
+
+@bundles_app.command("list")
+def list_bundles() -> None:
+    """List built-in policy bundles."""
+    typer.echo("Built-in AgentReviewOps policy bundles")
+    for bundle in list_policy_bundles():
+        typer.echo(f"- {bundle.id}: {bundle.name} - {bundle.description}")
+
+
+@bundles_app.command("show")
+def show_bundle(bundle_id: str = typer.Argument(..., help="Built-in policy bundle id.")) -> None:
+    """Print a built-in policy bundle as AgentReviewOps YAML."""
+    try:
+        typer.echo(policy_bundle_to_yaml(bundle_id), nl=False)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+
+@app.command("init")
+def init_project(
+    bundle_id: str = typer.Option(
+        "starter",
+        "--bundle",
+        help="Built-in policy bundle id.",
+    ),
+    config_path: Path = typer.Option(
+        Path(DEFAULT_CONFIG_PATH),
+        "--config-path",
+        dir_okay=False,
+        help="Path for the generated AgentReviewOps config.",
+    ),
+    workflow_path: Path = typer.Option(
+        Path(".github/workflows/agentreview.yml"),
+        "--workflow-path",
+        dir_okay=False,
+        help="Path for the generated GitHub Actions workflow.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing generated files.",
+    ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Do not prompt. Existing files fail unless --force is set.",
+    ),
+    write_workflow: bool = typer.Option(
+        True,
+        "--write-workflow/--no-write-workflow",
+        help="Write a GitHub Actions workflow snippet.",
+    ),
+    comment: bool = typer.Option(
+        True,
+        "--comment/--no-comment",
+        help="Enable pull request comments in the generated workflow.",
+    ),
+    checks: bool = typer.Option(
+        False,
+        "--checks/--no-checks",
+        help="Enable GitHub Check Runs in the generated workflow.",
+    ),
+    fail_on: FailOnLevel = typer.Option(
+        FailOnLevel.HIGH,
+        "--fail-on",
+        help="Generated workflow fail-on level.",
+    ),
+    request_reviewers: bool = typer.Option(
+        False,
+        "--request-reviewers/--no-request-reviewers",
+        help="Enable GitHub reviewer requests in the generated workflow.",
+    ),
+    sarif: bool = typer.Option(
+        False,
+        "--sarif/--no-sarif",
+        help="Write and upload SARIF in the generated workflow.",
+    ),
+) -> None:
+    """Generate project-local AgentReviewOps setup files."""
+    try:
+        bundle = get_policy_bundle(bundle_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    created_files = []
+    config_content = policy_bundle_to_yaml(bundle.id)
+    _write_init_file(config_path, config_content, force=force, non_interactive=non_interactive)
+    created_files.append(config_path)
+
+    if write_workflow:
+        workflow_content = _build_github_actions_workflow(
+            config_path=config_path,
+            comment=comment,
+            checks=checks,
+            fail_on=fail_on.value,
+            request_reviewers=request_reviewers,
+            sarif=sarif,
+        )
+        _write_init_file(workflow_path, workflow_content, force=force, non_interactive=non_interactive)
+        created_files.append(workflow_path)
+
+    typer.echo("AgentReviewOps init complete")
+    typer.echo(f"Bundle: {bundle.id} ({bundle.name})")
+    typer.echo("Created files:")
+    for created_file in created_files:
+        typer.echo(f"- {created_file}")
+    typer.echo("")
+    typer.echo("Next steps:")
+    typer.echo("1. Review the generated config and workflow before committing.")
+    typer.echo(f"2. Run: agentreview scan-diff --diff-file <diff> --config {config_path}")
 
 
 @app.command("scan-diff")
@@ -694,6 +810,99 @@ def comment_pr(
     typer.echo("AgentReviewOps")
     typer.echo(f"GitHub PR: {repo}#{pr_number}")
     typer.echo(f"GitHub comment: {comment_url}")
+
+
+def _write_init_file(path: Path, content: str, *, force: bool, non_interactive: bool) -> None:
+    if path.exists() and not force:
+        if non_interactive:
+            typer.echo(f"{path} already exists. Pass --force to overwrite.", err=True)
+            raise typer.Exit(code=2)
+        if not typer.confirm(f"{path} already exists. Overwrite?"):
+            typer.echo(f"Skipped existing file: {path}", err=True)
+            raise typer.Exit(code=2)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        typer.echo(f"Could not write {path}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _build_github_actions_workflow(
+    *,
+    config_path: Path,
+    comment: bool,
+    checks: bool,
+    fail_on: str,
+    request_reviewers: bool,
+    sarif: bool,
+) -> str:
+    permissions = ["contents: read"]
+    if comment or request_reviewers:
+        permissions.append("pull-requests: write")
+    else:
+        permissions.append("pull-requests: read")
+    if checks:
+        permissions.append("checks: write")
+    if sarif:
+        permissions.append("security-events: write")
+
+    action_inputs = [
+        "          github-token: ${{ github.token }}",
+        f"          config: {_quote_yaml_string(str(config_path))}",
+        f'          comment: "{str(comment).lower()}"',
+        f"          fail-on: {fail_on}",
+    ]
+    if checks:
+        action_inputs.append('          checks: "true"')
+    if request_reviewers:
+        action_inputs.extend(
+            [
+                '          request-reviewers: "true"',
+                "          reviewer-request-mode: users-and-teams",
+                "          reviewer-request-failure-mode: warn",
+            ]
+        )
+    if sarif:
+        action_inputs.append("          sarif-output: agentreview.sarif.json")
+
+    lines = [
+        "name: AgentReviewOps",
+        "",
+        "on:",
+        "  pull_request:",
+        "",
+        "permissions:",
+        *[f"  {permission}" for permission in permissions],
+        "",
+        "jobs:",
+        "  review:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - uses: actions/checkout@v4",
+        "        with:",
+        "          fetch-depth: 0",
+        "",
+        "      # Use a released tag or pin to a full commit SHA for production.",
+        "      - uses: Shen-3/agentreviewops@v0",
+        "        with:",
+        *action_inputs,
+    ]
+    if sarif:
+        lines.extend(
+            [
+                "",
+                "      - uses: github/codeql-action/upload-sarif@v3",
+                "        if: always()",
+                "        with:",
+                "          sarif_file: agentreview.sarif.json",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _quote_yaml_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _response_error_detail(response: httpx.Response) -> str:

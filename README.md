@@ -4,9 +4,17 @@ AgentReviewOps is a policy-as-code risk gate for AI-generated pull requests. It 
 
 Use it when your team uses Cursor, Copilot, Devin, Codex, Claude Code, or other coding agents and needs deterministic governance before merge.
 
-## Recommended GitHub Action Usage
+## Fastest Start
 
-After the first release, use a stable release tag such as `Shen-3/agentreviewops@v0`. For production, pin to a release tag or a full commit SHA; use `@main` only when testing unreleased changes.
+After the first release, use `Shen-3/agentreviewops@v0`; for local development use `@main`; for production pin to a release tag or full SHA.
+
+Generate the default config and workflow:
+
+```bash
+agentreview init --bundle starter
+```
+
+### Minimal PR comment gate
 
 ```yaml
 name: AgentReviewOps
@@ -19,7 +27,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  review-gate:
+  agentreview:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,57 +37,91 @@ jobs:
       - uses: Shen-3/agentreviewops@v0
         with:
           github-token: ${{ github.token }}
-          config: .agentreview.yml
           comment: "true"
           fail-on: high
 ```
 
-`fail-on` controls the CI threshold. For example, `fail-on: high` exits non-zero for `high` or `block` risk after the Markdown report and optional PR comment are produced.
+### Recommended governance gate
 
-Add the governance gate options when you want CODEOWNERS routing, GitHub Checks, and reviewer requests:
-
-```yaml
-permissions:
-  contents: read
-  pull-requests: write
-  checks: write
-
-steps:
-  - uses: Shen-3/agentreviewops@v0
-    with:
-      github-token: ${{ github.token }}
-      comment: "true"
-      checks: "true"
-      request-reviewers: "true"
-      reviewer-request-mode: users-and-teams
-      reviewer-request-failure-mode: warn
-      fail-on: high
-      codeowners-file: .github/CODEOWNERS
-```
-
-Add SARIF export only when you also upload Code Scanning results:
+Add `.agentreview.yml` and keep reviewer requests/checks opt-in:
 
 ```yaml
 - uses: Shen-3/agentreviewops@v0
   with:
     github-token: ${{ github.token }}
-    sarif-output: agentreview.sarif.json
-
-- uses: github/codeql-action/upload-sarif@v3
-  if: always()
-  with:
-    sarif_file: agentreview.sarif.json
+    config: .agentreview.yml
+    comment: "true"
+    checks: "true"
+    fail-on: high
+    codeowners-file: .github/CODEOWNERS
 ```
 
-Reviewer requests and GitHub Checks are opt-in. Keep `request-reviewers: "false"` and `checks: "false"` or omit them when you only want report/comment behavior. Workflows that comment or request reviewers need `pull-requests: write`; workflows that publish check runs need `checks: write`:
+### Advanced reviewer requests
+
+```yaml
+- uses: Shen-3/agentreviewops@v0
+  with:
+    github-token: ${{ github.token }}
+    config: .agentreview.yml
+    comment: "true"
+    request-reviewers: "true"
+    reviewer-request-mode: users-and-teams
+    reviewer-request-failure-mode: warn
+    fail-on: high
+```
+
+Reviewer requests need `pull-requests: write` and GitHub login mappings for repository members.
+
+### Advanced SARIF / Code Scanning export
 
 ```yaml
 permissions:
   contents: read
   pull-requests: write
-  checks: write
   security-events: write
+
+steps:
+  - uses: Shen-3/agentreviewops@v0
+    with:
+      github-token: ${{ github.token }}
+      sarif-output: agentreview.sarif.json
+
+  - uses: github/codeql-action/upload-sarif@v3
+    if: always()
+    with:
+      sarif_file: agentreview.sarif.json
 ```
+
+### Self-hosted dashboard/API
+
+```bash
+cp .env.example .env
+docker compose -f deploy/docker-compose.yml up --build
+```
+
+This starts PostgreSQL, the FastAPI API on `http://127.0.0.1:8000`, and the dashboard on `http://127.0.0.1:8080`.
+
+## Policy Bundles
+
+Built-in bundles provide deterministic starting points:
+
+- `starter`
+- `security`
+- `github-actions`
+- `python`
+- `dependency-governance`
+- `ai-pr-strict`
+- `enterprise-strict`
+
+Inspect and generate them:
+
+```bash
+agentreview bundles list
+agentreview bundles show starter
+agentreview init --bundle ai-pr-strict --checks --request-reviewers
+```
+
+See [policy bundle docs](docs/policy-bundles.md).
 
 ## Current Status
 
@@ -87,7 +129,7 @@ This repository is at the CLI/API/dashboard foundation stage. It provides a Type
 
 GitHub Action usage is the primary entrypoint for PR quality gates. Self-hosted API/dashboard submission, artifact-based reports, and GitHub PR comments are supported. Multi-tenant auth foundations, package-discovered analyzer plugins, and an opt-in OpenAI-compatible AI provider exist; hosted deployment is intentionally not implemented yet.
 
-## Quick Start
+## Development
 
 ### Local CLI
 
@@ -101,17 +143,6 @@ uv run pytest
 pnpm install
 pnpm --filter agentreviewops-web dev
 ```
-
-### Docker Compose Self-Hosting
-
-Docker Compose remains the recommended self-hosted API/dashboard path:
-
-```bash
-cp .env.example .env
-docker compose -f deploy/docker-compose.yml up --build
-```
-
-This starts PostgreSQL, the FastAPI API on `http://127.0.0.1:8000`, and the dashboard on `http://127.0.0.1:8080`.
 
 Run the API locally in another shell when developing against live dashboard data:
 
@@ -150,6 +181,9 @@ python -m venv .venv
 
 ```bash
 agentreview --help
+agentreview bundles list
+agentreview bundles show starter
+agentreview init --bundle starter --non-interactive
 agentreview scan-diff --diff-file examples/sample.diff --config .agentreview.example.yml --output agentreview-report.md --json-output agentreview-report.json --fail-on high --codeowners-file .github/CODEOWNERS
 agentreview scan-diff --diff-file examples/sample.diff --output agentreview-report.md --sarif-output agentreview.sarif.json
 GITHUB_TOKEN=<github-token> agentreview scan-diff --diff-file examples/sample.diff --output agentreview-report.md --checks --repo owner/name --head-sha <sha> --fail-on high
