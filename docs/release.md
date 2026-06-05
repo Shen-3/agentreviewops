@@ -27,6 +27,8 @@ git diff --check
 
 Verify action examples in `README.md`, `docs/github-action.md`, and `docs/sarif.md`.
 
+Confirm `CHANGELOG.md`, `SECURITY.md`, `CONTRIBUTING.md`, and `docs/v0-readiness.md` are current. Review README, GitHub Action, self-hosting, policy bundle, plugin, CLI, troubleshooting, and release docs before tagging.
+
 ## Test The Local Action
 
 Before tagging, run the action self-test workflow on the release candidate branch:
@@ -37,6 +39,8 @@ gh run list --workflow action-self-test.yml --limit 5
 ```
 
 The workflow must exercise `uses: ./` with comments, checks, and reviewer requests disabled, and verify Markdown, JSON, and SARIF output files exist.
+
+Also confirm `.github/workflows/agentreview.yml` runs on a pull request and publishes Markdown, JSON, and SARIF artifacts while comments and Checks are enabled.
 
 ## Create A Release Tag
 

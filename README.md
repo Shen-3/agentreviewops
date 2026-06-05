@@ -125,9 +125,11 @@ See [policy bundle docs](docs/policy-bundles.md).
 
 ## Current Status
 
-This repository is at the CLI/API/dashboard foundation stage. It provides a Typer-based `agentreview` command that can scan a unified diff or GitHub pull request, apply deterministic risk rules and enabled analyzer plugins, optionally add an AI-authored summary, persist analysis runs and audit events through FastAPI, and manage the self-hosted review control plane from a React dashboard.
+Current status: pre-v0 beta candidate. The CLI, GitHub Action, deterministic risk engine, review routing, JSON/SARIF/Checks outputs, self-hosted API/dashboard, governance metrics, policy bundles, and init onboarding are implemented. Hosted deployment is intentionally not implemented.
 
-GitHub Action usage is the primary entrypoint for PR quality gates. Self-hosted API/dashboard submission, artifact-based reports, and GitHub PR comments are supported. Multi-tenant auth foundations, package-discovered analyzer plugins, and an opt-in OpenAI-compatible AI provider exist; hosted deployment is intentionally not implemented yet.
+GitHub Action usage is the primary entrypoint for PR quality gates. Self-hosted API/dashboard submission, artifact-based reports, GitHub PR comments, GitHub Checks, reviewer requests, package-discovered analyzer plugins, and an opt-in OpenAI-compatible AI provider are supported.
+
+Known limitations before a public v0 release are tracked in [docs/v0-readiness.md](docs/v0-readiness.md). AgentReviewOps is not a SAST replacement, not a human review replacement, does not implement hosted SaaS, and does not implement OAuth or GitHub App auth.
 
 ## Development
 
@@ -434,7 +436,7 @@ plugins:
     timeout_seconds: 5
 ```
 
-The built-in example plugin demonstrates the contract by flagging dependency manifests. Enabled plugins are loaded from the built-in registry and installed Python package entry points in the `agentreview.plugins` group. Plugin output is validated as `RiskFinding` data before it can affect risk scoring.
+The built-in example plugin demonstrates the contract by flagging dependency manifests. Enabled plugins are loaded from the built-in registry and installed Python package entry points in the `agentreview.plugins` group. Plugin output is validated as `RiskFinding` data before it can affect risk scoring. Package-discovered plugins run in an isolated child process with a timeout and stripped environment, but this is not a full OS sandbox. See [plugin docs](docs/plugins.md).
 
 Third-party packages can expose analyzer plugins from `pyproject.toml`:
 
@@ -448,6 +450,8 @@ my-analyzer = "my_package.plugins:MyAnalyzerPlugin"
 AgentReviewOps is a review prioritization tool. It does not claim to prove that a pull request is secure or safe to merge.
 
 The CLI runs locally without sending source code to external services.
+
+Use `pull_request`, not `pull_request_target`, for untrusted external PRs unless you fully understand the fork PR token and secret exposure risk. Do not expose write tokens, repository secrets, GitHub tokens, AgentReviewOps API keys, or OpenAI-compatible provider keys to untrusted code. See [SECURITY.md](SECURITY.md) and [GitHub Action docs](docs/github-action.md).
 
 ## Contributing
 

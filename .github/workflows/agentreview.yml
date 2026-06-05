@@ -1,0 +1,38 @@
+name: AgentReviewOps Dogfood
+
+"on":
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  agentreview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: ./
+        with:
+          config: .agentreview.yml
+          output: agentreview-report.md
+          json-output: agentreview-report.json
+          sarif-output: agentreview.sarif.json
+          comment: "true"
+          checks: "true"
+          request-reviewers: "false"
+          fail-on: high
+          github-token: ${{ github.token }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentreview-output
+          path: |
+            agentreview-report.md
+            agentreview-report.json
+            agentreview.sarif.json

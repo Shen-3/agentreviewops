@@ -8,6 +8,12 @@ Keep API keys in GitHub Secrets. Do not echo GitHub tokens, AgentReviewOps API k
 
 The composite action installs the local package with `python -m pip install "$GITHUB_ACTION_PATH"` instead of editable install. It still resolves Python package dependencies at runtime; a future hardening step could publish a prebuilt Docker action or pinned wheel artifact.
 
+## Fork PR Threat Model
+
+Use `pull_request`, not `pull_request_target`, for untrusted external pull requests. `pull_request_target` runs in the base repository security context and can expose write tokens or secrets to attacker-controlled code if the workflow checks out or executes the PR head.
+
+Do not expose write tokens, repository secrets, AgentReviewOps API keys, GitHub tokens, or OpenAI-compatible provider keys to untrusted fork PRs unless you have reviewed the full workflow threat model. PR comments and reviewer requests need `pull-requests: write`, Checks need `checks: write`, and SARIF upload needs `security-events: write`; these capabilities may fail or be unavailable on fork PRs with restricted tokens. Use `reviewer-request-failure-mode: warn` when reviewer request failures should not block report publication.
+
 ## Minimal Setup
 
 This is the smallest PR comment gate:
@@ -28,7 +34,7 @@ jobs:
   agentreview:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -63,7 +69,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

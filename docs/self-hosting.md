@@ -100,6 +100,8 @@ pnpm --filter agentreviewops-web dev
 
 Open `http://127.0.0.1:5173` and paste the API key into the dashboard header. Session-only API key storage is the default. Browser storage keeps the key after the tab closes, so use it only on trusted devices, prefer the least-privileged key role that fits the task, and clear the key when finished. Without a key, the dashboard shows demo data. With a live key, the dashboard detects the key role through `/api/auth/me`: admin keys can manage users, repositories, policies, and keys; CI keys can submit analyses; read-only keys can inspect runs, governance metrics, governance state, and audit exports without mutation controls. Full OAuth or GitHub App browser auth is future work.
 
+The API allows local dashboard origins by default. For production, set `AGENTREVIEW_API_CORS_ORIGINS` to a comma-separated list of allowed dashboard origins, for example `https://agentreview.example.com`. Keep the API and dashboard behind your own TLS, network, and access controls.
+
 ## Legacy/Manual Fallback
 
 Use this path only when `uv` is unavailable and you need a classic editable Python install:

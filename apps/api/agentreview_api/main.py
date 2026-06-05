@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,6 +11,23 @@ from agentreview_api.schemas.auth import HealthResponse
 
 __all__ = ["app", "get_session"]
 
+DEFAULT_CORS_ORIGINS = [
+    "http://127.0.0.1:8080",
+    "http://localhost:8080",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:4173",
+    "http://localhost:4173",
+]
+
+
+def _cors_origins_from_env() -> list[str]:
+    raw_origins = os.environ.get("AGENTREVIEW_API_CORS_ORIGINS")
+    if raw_origins is None or not raw_origins.strip():
+        return DEFAULT_CORS_ORIGINS.copy()
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+
 app = FastAPI(
     title="AgentReviewOps API",
     version="0.1.0",
@@ -17,14 +36,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:8080",
-        "http://localhost:8080",
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:4173",
-        "http://localhost:4173",
-    ],
+    allow_origins=_cors_origins_from_env(),
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentreview.analysis import AnalysisExecutionResult
+from agentreview.security import redact_mapping, redact_text
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 SARIF_VERSION = "2.1.0"
@@ -62,13 +63,18 @@ def _normalize_analysis_result(analysis_result: AnalysisExecutionResult | dict) 
         return {
             "risk_score": analysis_result.analysis.risk_score,
             "risk_level": analysis_result.analysis.risk_level,
-            "findings": [finding.model_dump(mode="json") for finding in analysis_result.analysis.findings],
+            "findings": [
+                redact_mapping(finding.model_dump(mode="json")) for finding in analysis_result.analysis.findings
+            ],
             "changed_files": [changed_file.model_dump(mode="json") for changed_file in analysis_result.changed_files],
         }
     return {
         "risk_score": int(analysis_result.get("risk_score", 0)),
         "risk_level": str(analysis_result.get("risk_level", "low")),
-        "findings": list(analysis_result.get("findings") or []),
+        "findings": [
+            redact_mapping(finding) if isinstance(finding, dict) else finding
+            for finding in list(analysis_result.get("findings") or [])
+        ],
         "changed_files": list(analysis_result.get("changed_files") or []),
     }
 
@@ -83,10 +89,10 @@ def _sarif_rules(findings: list[dict]) -> list[dict]:
                 "id": rule_id,
                 "name": rule_id,
                 "shortDescription": {
-                    "text": str(finding.get("title") or rule_id),
+                    "text": redact_text(str(finding.get("title") or rule_id)),
                 },
                 "help": {
-                    "text": str(finding.get("description") or finding.get("title") or rule_id),
+                    "text": redact_text(str(finding.get("description") or finding.get("title") or rule_id)),
                 },
                 "properties": {
                     "category": "agentreviewops",
@@ -108,7 +114,7 @@ def _sarif_result(
         "ruleId": rule_id,
         "level": _sarif_level(str(finding.get("severity") or "info")),
         "message": {
-            "text": str(finding.get("description") or finding.get("title") or rule_id),
+            "text": redact_text(str(finding.get("description") or finding.get("title") or rule_id)),
         },
         "properties": {
             "riskLevel": risk_level,

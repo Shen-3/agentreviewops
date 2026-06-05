@@ -9,6 +9,7 @@ from agentreview.models import (
     RiskFinding,
     SuggestedReviewer,
 )
+from agentreview.security import redact_text
 
 
 def generate_markdown_report(
@@ -93,10 +94,10 @@ def _build_summary(analysis: RiskAnalysis, changed_files: list[DiffFile]) -> str
 
 
 def _build_ai_summary(ai_summary: DiffSummaryResult) -> str:
-    lines = [ai_summary.summary]
+    lines = [redact_text(ai_summary.summary)]
     if ai_summary.checklist:
         lines.extend(["", "### AI Checklist", ""])
-        lines.extend(f"- [ ] {item}" for item in ai_summary.checklist)
+        lines.extend(f"- [ ] {redact_text(item)}" for item in ai_summary.checklist)
     return "\n".join(lines)
 
 
@@ -117,7 +118,7 @@ def _build_findings_table(findings: list[RiskFinding]) -> str:
             f"{_escape_table_cell(finding.rule_id)} | "
             f"{score} | "
             f"{_escape_table_cell(finding.file_path or 'Change set')} | "
-            f"{_escape_table_cell(finding.description)} |"
+            f"{_escape_table_cell(redact_text(finding.description))} |"
         )
     return "\n".join(lines)
 
@@ -135,7 +136,7 @@ def _build_review_requirements_table(review_requirements: list[ReviewRequirement
             "| "
             f"{_escape_table_cell(requirement.title or requirement.requirement_id)} | "
             f"{_escape_table_cell(_format_reviewer_sources(requirement.suggested_reviewers))} | "
-            f"{_escape_table_cell(_format_review_requirement_reason(requirement))} |"
+            f"{_escape_table_cell(redact_text(_format_review_requirement_reason(requirement)))} |"
         )
     return "\n".join(lines)
 

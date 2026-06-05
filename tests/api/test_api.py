@@ -19,7 +19,7 @@ from agentreview.models import (
 )
 from agentreview_api.auth import key_prefix
 from agentreview_api.db import AnalysisRunRecord, AuditEventRecord, create_session_factory
-from agentreview_api.main import app, get_session
+from agentreview_api.main import DEFAULT_CORS_ORIGINS, _cors_origins_from_env, app, get_session
 from agentreview_api.repository import (
     create_analysis_run,
     create_api_key,
@@ -81,6 +81,18 @@ def test_health(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "agentreview-api"}
+
+
+def test_cors_origins_are_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTREVIEW_API_CORS_ORIGINS", raising=False)
+    assert _cors_origins_from_env() == DEFAULT_CORS_ORIGINS
+
+    monkeypatch.setenv(
+        "AGENTREVIEW_API_CORS_ORIGINS",
+        "https://dashboard.example.com, http://localhost:5173, ",
+    )
+
+    assert _cors_origins_from_env() == ["https://dashboard.example.com", "http://localhost:5173"]
 
 
 def test_auth_me_returns_api_key_context(client: TestClient) -> None:

@@ -7,6 +7,7 @@ from typing import Any
 
 from agentreview import __version__
 from agentreview.analysis import AnalysisExecutionResult
+from agentreview.security import redact_mapping
 
 RISK_LEVEL_ORDER = {
     "low": 0,
@@ -32,7 +33,7 @@ def build_analysis_json_payload(
             "should_fail": should_fail_for_threshold(result.analysis.risk_level, fail_on),
         },
         "summary": build_analysis_summary(result),
-        "findings": [finding.model_dump(mode="json") for finding in result.analysis.findings],
+        "findings": [redact_mapping(finding.model_dump(mode="json")) for finding in result.analysis.findings],
         "changed_files": [changed_file.model_dump(mode="json") for changed_file in result.changed_files],
         "review_requirements": [requirement.model_dump(mode="json") for requirement in result.review_requirements],
         "metadata": {

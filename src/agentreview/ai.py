@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from typing import Protocol
 
 import httpx
 from pydantic import Field
 
 from agentreview.models import AIConfig, DiffFile, RiskAnalysis, RiskFinding, StrictConfigModel
+from agentreview.security import redact_text
 
 
 class AIProviderError(RuntimeError):
@@ -210,16 +210,4 @@ def _parse_provider_content(content: str) -> DiffSummaryResult:
 
 
 def redact_secrets(text: str) -> str:
-    redacted = text
-    for pattern, replacement in _TOKEN_PATTERNS:
-        redacted = pattern.sub(replacement, redacted)
-    redacted = _ASSIGNMENT_PATTERN.sub(lambda match: f"{match.group(1)}=[REDACTED]", redacted)
-    return redacted
-
-
-_TOKEN_PATTERNS = [
-    (re.compile(r"github_pat_[A-Za-z0-9_]+"), "github_pat_[REDACTED]"),
-    (re.compile(r"gh[pousr]_[A-Za-z0-9_]+"), "gh_[REDACTED]"),
-    (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "sk-[REDACTED]"),
-]
-_ASSIGNMENT_PATTERN = re.compile(r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[^'\"\s]+")
+    return redact_text(text)

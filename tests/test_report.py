@@ -3,7 +3,7 @@ from pathlib import Path
 from agentreview.ai import DiffSummaryResult
 from agentreview.config import load_config
 from agentreview.gitdiff import parse_diff_file
-from agentreview.models import ReviewRequirement, SuggestedReviewer
+from agentreview.models import DiffFile, ReviewRequirement, RiskAnalysis, RiskFinding, SuggestedReviewer
 from agentreview.report import generate_markdown_report
 from agentreview.risk import analyze_risk
 from agentreview.routing import build_review_requirements
@@ -88,3 +88,35 @@ def test_report_includes_required_review_sources_and_gaps() -> None:
     assert "Not configured" in report
     assert "- [ ] Assign an appropriate reviewer for unconfigured review requirement(s)." in report
     assert "- [ ] Confirm listed CODEOWNERS or repository reviewers approved the change." in report
+
+
+def test_report_redacts_secret_like_finding_descriptions_and_ai_summary() -> None:
+    analysis = RiskAnalysis(
+        risk_score=50,
+        risk_level="high",
+        findings=[
+            RiskFinding(
+                rule_id="secret-like-change",
+                severity="high",
+                title="Secret-like value",
+                description="Added token=ghp_1234567890 to settings.",
+                score_delta=30,
+                file_path="settings.py",
+            )
+        ],
+    )
+    ai_summary = DiffSummaryResult(
+        summary="Provider saw Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz.",
+        checklist=["Remove password=hunter2."],
+    )
+
+    report = generate_markdown_report(
+        analysis,
+        [DiffFile(path="settings.py", status="modified", additions=1, deletions=0)],
+        ai_summary=ai_summary,
+    )
+
+    assert "ghp_1234567890" not in report
+    assert "sk-abcdefghijklmnopqrstuvwxyz" not in report
+    assert "hunter2" not in report
+    assert "[REDACTED]" in report

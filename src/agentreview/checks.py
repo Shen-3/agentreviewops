@@ -6,6 +6,7 @@ from agentreview.analysis import AnalysisExecutionResult
 from agentreview.analysis_output import build_analysis_summary, should_fail_for_threshold
 from agentreview.integrations.github import CheckRunAnnotation
 from agentreview.models import RiskFinding
+from agentreview.security import redact_text
 
 CHECK_ANNOTATION_LIMIT = 50
 
@@ -86,8 +87,8 @@ def _annotations_for_findings(
                 start_line=finding.line_start,
                 end_line=finding.line_end or finding.line_start,
                 annotation_level=_annotation_level(finding),
-                message=finding.description,
-                title=finding.title,
+                message=redact_text(finding.description),
+                title=redact_text(finding.title),
                 raw_details=f"Rule: {finding.rule_id}; severity: {finding.severity}",
             )
         )
@@ -112,10 +113,10 @@ def _check_text(result: AnalysisExecutionResult, positive_findings: list[RiskFin
         location = finding.file_path or "change set"
         if finding.line_start is not None:
             location = f"{location}:{finding.line_start}"
-        lines.append(f"- {finding.severity.upper()} `{finding.rule_id}` at {location}: {finding.title}")
+        lines.append(f"- {finding.severity.upper()} `{finding.rule_id}` at {location}: {redact_text(finding.title)}")
 
     if result.review_requirements:
         lines.extend(["", "## Required Human Review", ""])
         for requirement in result.review_requirements:
-            lines.append(f"- {requirement.title}: {requirement.reason}")
+            lines.append(f"- {redact_text(requirement.title)}: {redact_text(requirement.reason)}")
     return "\n".join(lines)

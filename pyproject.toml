@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agentreviewops"
 version = "0.1.0"
-description = "CLI-first quality gate for AI-generated pull requests."
+description = "Policy-as-code governance gate for AI-generated pull requests."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["ai", "code-review", "github", "pull-requests", "governance"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",

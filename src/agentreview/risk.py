@@ -73,6 +73,27 @@ PYTHON_SUBPROCESS_SHELL_TRUE_RE = re.compile(r"\bshell\s*=\s*True\b")
 PYTHON_EVAL_EXEC_RE = re.compile(r"(?<![\w.])(?:eval|exec)\s*\(")
 PYTHON_UNSAFE_YAML_LOAD_RE = re.compile(r"(?<![\w.])yaml\.load\s*\(")
 
+BUILT_IN_RULE_IDS = {
+    "critical-path-change",
+    "dependency-change",
+    "ci-change",
+    "sensitive-area-change",
+    "generated-file-added",
+    "database-migration-change",
+    "github-actions-write-all-permissions",
+    "github-actions-pull-request-target",
+    "github-actions-unpinned-action",
+    "python-subprocess-shell-true",
+    "python-eval-exec",
+    "python-unsafe-yaml-load",
+    "large-diff",
+    "missing-tests",
+    "missing-docs",
+    "tests-updated",
+    "docs-updated",
+    "small-focused-diff",
+}
+
 
 def analyze_risk(
     changed_files: list[DiffFile],

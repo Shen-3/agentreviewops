@@ -104,6 +104,35 @@ def test_action_self_test_workflow_is_read_only_and_uses_local_action() -> None:
     assert "2.1.0" in steps_text
 
 
+def test_agentreview_dogfood_workflow_uses_local_action_with_governance_outputs() -> None:
+    workflow = yaml.safe_load((PROJECT_ROOT / ".github" / "workflows" / "agentreview.yml").read_text(encoding="utf-8"))
+
+    assert workflow["name"] == "AgentReviewOps Dogfood"
+    assert workflow["on"] == {"pull_request": None}
+    assert workflow["permissions"] == {"contents": "read", "pull-requests": "write", "checks": "write"}
+    steps = workflow["jobs"]["agentreview"]["steps"]
+    assert steps[0]["uses"] == "actions/checkout@v6"
+    assert steps[0]["with"]["fetch-depth"] == 0
+    assert any(step.get("uses") == "./" for step in steps)
+    steps_text = str(steps)
+    assert "config': '.agentreview.yml'" in steps_text
+    assert "comment': 'true'" in steps_text
+    assert "checks': 'true'" in steps_text
+    assert "request-reviewers': 'false'" in steps_text
+    assert "agentreview-report.json" in steps_text
+    assert "agentreview.sarif.json" in steps_text
+
+
+def test_agentreview_dogfood_config_is_valid() -> None:
+    config = yaml.safe_load((PROJECT_ROOT / ".agentreview.yml").read_text(encoding="utf-8"))
+
+    assert config["version"] == 1
+    assert config["risk"]["fail_level"] == "high"
+    assert "src/**" in config["critical_paths"]
+    assert "apps/web/**" in config["critical_paths"]
+    assert config["plugins"] == []
+
+
 def test_github_action_docs_explain_artifact_flow() -> None:
     docs = (PROJECT_ROOT / "docs" / "github-action.md").read_text(encoding="utf-8")
 
@@ -139,6 +168,24 @@ def test_release_docs_exist_and_document_validation() -> None:
     assert "pnpm --filter agentreviewops-web lint" in docs
     assert "git tag -a v0.x.y" in docs
     assert "git push origin -f v0" in docs
+
+
+def test_release_hygiene_docs_exist() -> None:
+    for relative_path in [
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "CONTRIBUTING.md",
+        "docs/index.md",
+        "docs/cli.md",
+        "docs/plugins.md",
+        "docs/troubleshooting.md",
+        "docs/v0-readiness.md",
+    ]:
+        assert (PROJECT_ROOT / relative_path).read_text(encoding="utf-8").strip()
+
+    readiness = (PROJECT_ROOT / "docs" / "v0-readiness.md").read_text(encoding="utf-8")
+    assert "Hosted deployment is intentionally not implemented" in readiness
+    assert "External plugin sandboxing is limited" in readiness
 
 
 def test_docs_do_not_use_main_as_production_default() -> None:

@@ -68,6 +68,8 @@ review_routing:
 
 The generated file also includes rule toggles, agent detection defaults, AI disabled by default, plugin defaults, and concrete review routing rules.
 
+Bundle routing `rule_ids` are validated against built-in deterministic finding rule IDs so typoed routes do not silently stop matching findings.
+
 ## Bundle Notes
 
 `starter` keeps `fail_level: high` and moderate large-diff thresholds to avoid being overly strict on first adoption.

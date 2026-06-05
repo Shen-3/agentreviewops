@@ -118,6 +118,30 @@ def test_check_run_caps_annotations_and_notes_omissions() -> None:
     )
 
 
+def test_check_run_redacts_secret_like_annotation_text() -> None:
+    result = _analysis_result(
+        risk_level="high",
+        risk_score=70,
+        findings=[
+            RiskFinding(
+                rule_id="secret-like-change",
+                severity="high",
+                title="Token token=ghp_1234567890",
+                description="Added Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz.",
+                score_delta=30,
+                file_path="settings.py",
+                line_start=1,
+            )
+        ],
+    )
+
+    content = analysis_to_check_run_content(result, fail_on="high")
+
+    assert "ghp_1234567890" not in content.text
+    assert "sk-abcdefghijklmnopqrstuvwxyz" not in content.annotations[0].message
+    assert "[REDACTED]" in content.text
+
+
 def _analysis_result(
     *,
     risk_level: str,
